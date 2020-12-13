@@ -3,6 +3,7 @@
 #include "esp_log.h"
 #include "nvs_flash.h"
 
+#include "http.h"
 #include "i2s_interface.h"
 #include "wifi.h"
 
@@ -21,6 +22,9 @@ extern "C" void app_main()
 
   // Initalize WiFi and connect to configured network
   WiFi::init_station();
+
+  // Start the HTTP task
+  xTaskCreate(HTTP::task, "HTTPTask", 8192, NULL, 1, NULL);
 
   // Initalize I2S Rx
   //I2S::init();
