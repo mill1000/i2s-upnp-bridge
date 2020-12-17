@@ -23,9 +23,9 @@ extern "C" void app_main()
   // Initalize WiFi and connect to configured network
   WiFi::init_station();
 
-  // Start the HTTP task
-  xTaskCreate(HTTP::task, "HTTPTask", 8192, NULL, 1, NULL);
-
   // Initalize I2S Rx
-  //I2S::init();
+  I2S::init();
+
+  // Start the HTTP task
+  xTaskCreate(HTTP::task, "HTTPTask", 8192, NULL, 4, NULL);
 }
