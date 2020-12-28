@@ -9,6 +9,8 @@
 
 #define TAG "HTTP"
 
+int16_t samples[2 * I2S::BUFFER_SAMPLE_COUNT];
+
 /**
   @brief  Generic Mongoose event handler for the HTTP server
   
@@ -28,21 +30,34 @@ static void httpEventHandler(struct mg_connection* nc, int ev, void* ev_data)
     
       // Reassign event handler for this client so MG_EV_SEND will fire in this function
       nc->handler = httpEventHandler;
-
+      ESP_LOGI(TAG, "Sending");
       break;
     }
 
     case MG_EV_SEND:
     {
+
       // Read as much data as possible from the I2S interface
+      size_t total = 0;
       while (true)
       {
-        int16_t samples[I2S::BUFFER_SAMPLE_COUNT];
-        size_t read = I2S::read(samples, sizeof(samples), pdMS_TO_TICKS(10));
+        size_t read = I2S::read(samples, sizeof(samples), pdMS_TO_TICKS(200));
         mg_send(nc, samples, read);
 
+        total += read;
+
         if (read != sizeof(samples))
+        {
+          ESP_LOGI(TAG, "Only read %d of %d bytes", read, sizeof(samples));
           break; // I2S low on data
+        }
+
+        if (total > 1024)
+        {
+          //ESP_LOGI(TAG, "full");
+          break; // I2S low on data
+        }
+
 
         // TODO there is probably some condition we should close the connection under
       }
