@@ -25,7 +25,7 @@ static void httpEventHandler(struct mg_connection* nc, int ev, void* ev_data)
     case MG_EV_HTTP_REQUEST:
     {
       // Send the header. Shamelessly stolen from what AirAudio sends
-      mg_send_response_line(nc, 200, "Content-Type: audio/L16;rate=48000;channels=2\r\nAccept-Ranges: none\r\nCache-Control: no-cache,no-store,must-revalidate,max-age=0\r\n");
+      mg_send_response_line(nc, 200, "Content-Type: audio/L16;rate=48000;channels=2\r\nAccept-Ranges: none\r\nCache-Control: no-cache,no-store,must-revalidate,max-age=0");
     
       // Reassign event handler for this client so MG_EV_SEND will fire in this function
       nc->handler = httpEventHandler;
