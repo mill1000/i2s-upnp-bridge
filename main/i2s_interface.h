@@ -8,9 +8,9 @@ namespace I2S
 {
   constexpr int SAMPLE_FREQUENCTY = 48e3;
 
-  // Total buffer space = 50 * 480 * 4 bytes -> 96 kB
-  constexpr int BUFFER_SAMPLE_COUNT = 120;  // Number of samples to make a 10 ms chunk @ 48 kHz
-  constexpr int BUFFER_COUNT = 50;  // 50 * 10 ms -> 500 ms of buffering
+  // Total buffer space = 10 * 480 * 4 bytes -> 19.2 kB
+  constexpr int BUFFER_SAMPLE_COUNT = 480;  // Number of samples to make a 10 ms chunk @ 48 kHz
+  constexpr int BUFFER_COUNT = 10;  // 10 * 10 ms -> 100 ms of buffering
 
   typedef int16_t sample_t;
 
