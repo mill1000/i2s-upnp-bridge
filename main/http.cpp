@@ -29,7 +29,11 @@ static void httpEventHandler(struct mg_connection* nc, int ev, void* ev_data)
     
       // Reassign event handler for this client so MG_EV_SEND will fire in this function
       nc->handler = httpEventHandler;
-      ESP_LOGI(TAG, "Sending");
+      
+      char addr[32];
+      mg_sock_addr_to_str(&nc->sa, addr, sizeof(addr), MG_SOCK_STRINGIFY_IP | MG_SOCK_STRINGIFY_PORT);
+      ESP_LOGI(TAG, "New request from %s.", addr);
+
       break;
     }
 
@@ -52,6 +56,15 @@ static void httpEventHandler(struct mg_connection* nc, int ev, void* ev_data)
 
         // TODO there is probably some condition we should close the connection under
       }
+
+      break;
+    }
+
+    case MG_EV_CLOSE:
+    {
+      char addr[32];
+      mg_sock_addr_to_str(&nc->sa, addr, sizeof(addr), MG_SOCK_STRINGIFY_IP | MG_SOCK_STRINGIFY_PORT);
+      ESP_LOGI(TAG, "Disconnected from %s.", addr);
 
       break;
     }
