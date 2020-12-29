@@ -47,8 +47,15 @@ static void httpEventHandler(struct mg_connection* nc, int ev, void* ev_data)
         // Calculate the number of bytes to read
         size_t length = Utils::min(HTTP::MAX_SEND_BUFFER_LENGTH - nc->send_mbuf.len, sizeof(samples));
 
+        // Round length down to multiples of a sample
+        length = length - length % sizeof(I2S::sample_t);
+        assert(length % sizeof(I2S::sample_t) == 0);
+
         size_t read = I2S::read(samples, length, pdMS_TO_TICKS(200));
         mg_send(nc, samples, read);
+
+        // We'll be in trouble if we read something smaller than a sample
+        assert(read % sizeof(I2S::sample_t) == 0);
 
         if (read < length)
           break; // I2S low on data
