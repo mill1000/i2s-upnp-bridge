@@ -12,9 +12,14 @@
 
 #define TAG "I2S"
 
+/**
+  @brief  Initialize the I2S interface
+
+  @param  none
+  @retval none
+*/
 void I2S::init()
 {
-
   i2s_config_t config;
   memset(&config, 0, sizeof(i2s_config_t));
 
@@ -48,9 +53,18 @@ void I2S::init()
   // gpio_set_pull_mode(GPIO_NUM_14, GPIO_PULLUP_ONLY);
 }
 
+/**
+  @brief  Attempt to read from the I2S interface.
+
+  @param  samples Buffer to store sample data to
+  @param  length Number of bytes (not samples!) to read
+  @param  waitTicks Number of ticks to wait for data.
+  @retval size_t - Actual number of bytes read
+*/
 size_t I2S::read(sample_t samples[], size_t length, TickType_t waitTicks)
 {
   size_t read = 0;
   i2s_read(I2S_NUM_0, samples, length, &read, waitTicks);
+  
   return read;
 }
