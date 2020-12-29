@@ -82,7 +82,7 @@ static void httpEventHandler(struct mg_connection* nc, int ev, void* ev_data)
 */
 void HTTP::task(void* pvParameters)
 {
-  ESP_LOGI(TAG, "Starting HTTP server...");
+  ESP_LOGI(TAG, "Starting HTTP server.");
 
   // Create and init the event manager
   struct mg_mgr manager;
