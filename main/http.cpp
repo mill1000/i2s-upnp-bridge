@@ -7,33 +7,41 @@
 #include "http.h"
 #include "mongoose.h"
 #include "utils.h"
+#include "wav.h"
 
 #define TAG "HTTP"
 
 /**
-  @brief  Generic Mongoose event handler for the HTTP server
+  @brief  Sends HTTP responses on the provided connection
+  
+  @param  nc Mongoose connection
+  @param  code HTTP event code to send
+  @param  message HTTP response body to send
+  @retval none
+*/
+static void httpSendResponse(struct mg_connection* nc, uint16_t code, const char* message)
+{
+  mg_send_head(nc, code, strlen(message), "Content-Type: text/html");
+  mg_printf(nc, message);
+  nc->flags |= MG_F_SEND_AND_CLOSE;
+}
+
+/**
+  @brief  Mongoose event handler to stream PCM data
   
   @param  nc Mongoose connection
   @param  ev Mongoose event calling the function
   @param  ev_data Event data pointer
   @retval none
 */
-static void httpEventHandler(struct mg_connection* nc, int ev, void* ev_data)
+static void streamEventHandler(struct mg_connection* nc, int ev, void* ev_data)
 {
   switch(ev)
   {
     case MG_EV_HTTP_REQUEST:
     {
-      char addr[32];
-      mg_sock_addr_to_str(&nc->sa, addr, sizeof(addr), MG_SOCK_STRINGIFY_IP | MG_SOCK_STRINGIFY_PORT);
-      ESP_LOGI(TAG, "New request from %s.", addr);
-
-      // Send the header. Shamelessly stolen from what AirAudio sends
-      mg_send_response_line(nc, 200, "Content-Type: audio/L16;rate=48000;channels=2\r\nAccept-Ranges: none\r\nCache-Control: no-cache,no-store,must-revalidate,max-age=0\r\n");
-    
-      // Reassign event handler for this client so MG_EV_SEND will fire in this function
-      nc->handler = httpEventHandler;
-
+      // We don't expect HTTP requests on this handler
+      httpSendResponse(nc, 500, "Unhandled request.");
       break;
     }
 
@@ -81,6 +89,102 @@ static void httpEventHandler(struct mg_connection* nc, int ev, void* ev_data)
 }
 
 /**
+  @brief  Mongoose event handler for the WAV endpoint
+  
+  @param  nc Mongoose connection
+  @param  ev Mongoose event calling the function
+  @param  ev_data Event data pointer
+  @retval none
+*/
+static void wavStreamEventHandler(struct mg_connection* nc, int ev, void* ev_data)
+{
+  switch(ev)
+  {
+    case MG_EV_HTTP_REQUEST:
+    {
+      char addr[32];
+      mg_sock_addr_to_str(&nc->sa, addr, sizeof(addr), MG_SOCK_STRINGIFY_IP | MG_SOCK_STRINGIFY_PORT);
+      ESP_LOGI(TAG, "New WAV request from %s.", addr);
+
+      // Send the HTTP header
+      mg_send_response_line(nc, 200, "Content-Type: audio/wav\r\nAccept-Ranges: none\r\nCache-Control: no-cache,no-store,must-revalidate,max-age=0\r\n");
+
+      // Construct and send the WAV header
+      WAV::Header wav_header(48000);
+      mg_send(nc, &wav_header, sizeof(wav_header));
+
+      // Reassign event handler for this client
+      nc->handler = streamEventHandler;
+
+      break;
+    }
+
+    default:
+      break;
+  }
+}
+
+/**
+  @brief  Mongoose event handler for the raw PCM endpoint
+  
+  @param  nc Mongoose connection
+  @param  ev Mongoose event calling the function
+  @param  ev_data Event data pointer
+  @retval none
+*/
+static void pcmStreamEventHandler(struct mg_connection* nc, int ev, void* ev_data)
+{
+  switch(ev)
+  {
+    case MG_EV_HTTP_REQUEST:
+    {
+      char addr[32];
+      mg_sock_addr_to_str(&nc->sa, addr, sizeof(addr), MG_SOCK_STRINGIFY_IP | MG_SOCK_STRINGIFY_PORT);
+      ESP_LOGI(TAG, "New PCM request from %s.", addr);
+
+      // Send the header. Shamelessly stolen from what AirAudio sends
+      mg_send_response_line(nc, 200, "Content-Type: audio/L16;rate=48000;channels=2\r\nAccept-Ranges: none\r\nCache-Control: no-cache,no-store,must-revalidate,max-age=0 \r\n");
+
+      // Adding a byte of padding makes foobar happy?
+      // while (nc->send_mbuf.len % 2 != 1)
+      // {
+      //   uint8_t zero = 0;
+      //   mg_send(nc, &zero, sizeof(zero));
+      // }
+
+      // Reassign event handler for this client
+      nc->handler = streamEventHandler;
+
+      break;
+    }
+
+    default:
+      break;
+  }
+}
+
+/**
+  @brief  Generic Mongoose event handler for the HTTP server
+  
+  @param  nc Mongoose connection
+  @param  ev Mongoose event calling the function
+  @param  ev_data Event data pointer
+  @retval none
+*/
+static void httpEventHandler(struct mg_connection* nc, int ev, void* ev_data)
+{
+  switch(ev)
+  {
+    case MG_EV_HTTP_REQUEST:
+      httpSendResponse(nc, 200, "OK");
+      break;
+
+    default:
+      break;
+  }
+}
+
+/**
   @brief  Main task function of the HTTP server
   
   @param  pvParameters
@@ -106,6 +210,10 @@ void HTTP::task(void* pvParameters)
 
   // Enable HTTP on the connection
   mg_set_protocol_http_websocket(connection);
+
+  // Add seperate end points for raw PCM and WAV stream
+  mg_register_http_endpoint(connection, "/stream.pcm", pcmStreamEventHandler);
+  mg_register_http_endpoint(connection, "/stream.wav", wavStreamEventHandler);
 
   // Loop waiting for events
   while(1)
