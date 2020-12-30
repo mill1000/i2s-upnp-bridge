@@ -2,14 +2,19 @@
 #include "freertos/task.h"
 #include "esp_err.h"
 #include "esp_log.h"
-#include "i2s_interface.h"
+
+#include <unordered_set>
 
 #include "http.h"
 #include "mongoose.h"
+#include "i2s_interface.h"
 #include "utils.h"
 #include "wav.h"
 
 #define TAG "HTTP"
+
+static std::unordered_set<struct mg_connection*> clients;
+static SemaphoreHandle_t clientMutex;
 
 /**
   @brief  Sends HTTP responses on the provided connection
@@ -36,6 +41,24 @@ static void httpSendResponse(struct mg_connection* nc, uint16_t code, const char
 */
 static void streamEventHandler(struct mg_connection* nc, int ev, void* ev_data)
 {
+  // Lambda to fill outbound client buffer from it's associated queue
+  auto fill_client_buffer = [nc]()
+  {
+    // Get queue handle from the connection
+    QueueHandle_t queue = (QueueHandle_t) nc->user_data;
+    assert(queue != nullptr);
+    
+    // Fill up the outgoing buffer
+    while (nc->send_mbuf.len < HTTP::MAX_SEND_BUFFER_LENGTH)
+    {
+      I2S::sample_t samples[2 * I2S::BUFFER_SAMPLE_COUNT];
+      if (xQueueReceive(queue, &samples, 0) != pdTRUE)
+        break;
+      
+      mg_send(nc, samples, sizeof(samples));
+    }
+  };
+
   switch(ev)
   {
     case MG_EV_HTTP_REQUEST:
@@ -47,30 +70,15 @@ static void streamEventHandler(struct mg_connection* nc, int ev, void* ev_data)
 
     case MG_EV_SEND:
     {
-      I2S::sample_t samples[2 * I2S::BUFFER_SAMPLE_COUNT];
+      fill_client_buffer();
+      break;
+    }
 
-      // Fill up the outgoing buffer
-      while (nc->send_mbuf.len < HTTP::MAX_SEND_BUFFER_LENGTH)
-      {
-        // Calculate the number of bytes to read
-        size_t length = Utils::min(HTTP::MAX_SEND_BUFFER_LENGTH - nc->send_mbuf.len, sizeof(samples));
-
-        // Round length down to multiples of a sample
-        length = length - length % sizeof(I2S::sample_t);
-        assert(length % sizeof(I2S::sample_t) == 0);
-
-        size_t read = I2S::read(samples, length, pdMS_TO_TICKS(200));
-        mg_send(nc, samples, read);
-
-        // We'll be in trouble if we read something smaller than a sample
-        assert(read % sizeof(I2S::sample_t) == 0);
-
-        if (read < length)
-          break; // I2S low on data
-
-        // TODO there is probably some condition we should close the connection under
-      }
-
+    case MG_EV_POLL:
+    {
+      // If send buffer if empty, attempt to start sending data
+      if (nc->send_mbuf.len == 0)
+        fill_client_buffer();
       break;
     }
 
@@ -78,7 +86,18 @@ static void streamEventHandler(struct mg_connection* nc, int ev, void* ev_data)
     {
       char addr[32];
       mg_sock_addr_to_str(&nc->sa, addr, sizeof(addr), MG_SOCK_STRINGIFY_IP | MG_SOCK_STRINGIFY_PORT);
-      ESP_LOGI(TAG, "Disconnected from %s.", addr);
+      ESP_LOGI(TAG, "Client %s disconnected", addr);
+
+      // Delete the clients queue
+      if (nc->user_data != nullptr)
+        vQueueDelete((QueueHandle_t) nc->user_data);
+      else
+        ESP_LOGE(TAG, "No queue for client %s.", addr);
+
+      // Remove the client
+      xSemaphoreTake(clientMutex, portMAX_DELAY);
+      clients.erase(nc);
+      xSemaphoreGive(clientMutex);
 
       break;
     }
@@ -104,7 +123,30 @@ static void wavStreamEventHandler(struct mg_connection* nc, int ev, void* ev_dat
     {
       char addr[32];
       mg_sock_addr_to_str(&nc->sa, addr, sizeof(addr), MG_SOCK_STRINGIFY_IP | MG_SOCK_STRINGIFY_PORT);
-      ESP_LOGI(TAG, "New WAV request from %s.", addr);
+
+      // Lock the client list
+      xSemaphoreTake(clientMutex, portMAX_DELAY);
+
+      if (clients.count(nc))
+      {
+        ESP_LOGW(TAG, "Client %s already exists.", addr);
+        xSemaphoreGive(clientMutex);
+        return;
+      }
+
+      // Construct a queue for this client
+      QueueHandle_t queue = xQueueCreate(10, 2 * sizeof(I2S::sample_t) * I2S::BUFFER_SAMPLE_COUNT);
+      if (queue == nullptr)
+      {
+        ESP_LOGE(TAG, "Failed to create queue for client %s.", addr);
+        xSemaphoreGive(clientMutex);
+        return;
+      }
+
+      nc->user_data = queue;
+      clients.insert(nc);
+      xSemaphoreGive(clientMutex);
+      ESP_LOGI(TAG, "New WAV client %s -> %p.", addr, nc);
 
       // Send the HTTP header
       mg_send_response_line(nc, 200, "Content-Type: audio/wav\r\nAccept-Ranges: none\r\nCache-Control: no-cache,no-store,must-revalidate,max-age=0\r\n");
@@ -140,7 +182,30 @@ static void pcmStreamEventHandler(struct mg_connection* nc, int ev, void* ev_dat
     {
       char addr[32];
       mg_sock_addr_to_str(&nc->sa, addr, sizeof(addr), MG_SOCK_STRINGIFY_IP | MG_SOCK_STRINGIFY_PORT);
-      ESP_LOGI(TAG, "New PCM request from %s.", addr);
+
+      // Lock the client list
+      xSemaphoreTake(clientMutex, portMAX_DELAY);
+
+      if (clients.count(nc))
+      {
+        ESP_LOGW(TAG, "Client %s already exists.", addr);
+        xSemaphoreGive(clientMutex);
+        return;
+      }
+
+      // Construct a queue for this client
+      QueueHandle_t queue = xQueueCreate(20, 2 * sizeof(I2S::sample_t) * I2S::BUFFER_SAMPLE_COUNT);
+      if (queue == NULL)
+      {
+        ESP_LOGE(TAG, "Failed to create queue for client %s.", addr);
+        xSemaphoreGive(clientMutex);
+        return;
+      }
+
+      nc->user_data = queue;
+      clients.insert(nc);
+      xSemaphoreGive(clientMutex);
+      ESP_LOGI(TAG, "New PCM client %s -> %p.", addr, nc);
 
       // Send the header. Shamelessly stolen from what AirAudio sends
       mg_send_response_line(nc, 200, "Content-Type: audio/L16;rate=48000;channels=2\r\nAccept-Ranges: none\r\nCache-Control: no-cache,no-store,must-revalidate,max-age=0 \r\n");
@@ -194,6 +259,13 @@ void HTTP::task(void* pvParameters)
 {
   ESP_LOGI(TAG, "Starting HTTP server.");
 
+  clientMutex = xSemaphoreCreateMutex();
+  if (clientMutex == nullptr)
+  {
+    ESP_LOGE(TAG, "Failed to create client mutex.");
+    return;
+  }
+
   // Create and init the event manager
   struct mg_mgr manager;
   mg_mgr_init(&manager, NULL);
@@ -217,10 +289,50 @@ void HTTP::task(void* pvParameters)
 
   // Loop waiting for events
   while(1)
-    mg_mgr_poll(&manager, 1000);
+    mg_mgr_poll(&manager, 10);
 
   // Free the manager if we ever exit
   mg_mgr_free(&manager);
 
   vTaskDelete(NULL);
+}
+
+/**
+  @brief  Queue sample data for transmission to clients
+  
+  @param  samples Buffer to enque
+  @retval none
+*/
+void HTTP::queue_samples(const I2S::sample_t* samples)
+{
+  // Lock the client list
+  if (xSemaphoreTake(clientMutex, pdMS_TO_TICKS(200)) != pdTRUE)
+  {
+    ESP_LOGE(TAG, "Failed to lock client mutex.");
+    return;
+  }
+
+  for (const auto nc : clients)
+  {
+    // Get queue handle from the connection
+    QueueHandle_t queue = (QueueHandle_t) nc->user_data;
+    assert(queue != nullptr);
+
+    // Attempt to queue the sample data
+    if (xQueueSendToBack(queue, samples, pdMS_TO_TICKS(50)) == pdTRUE)
+      continue;
+    
+    ESP_LOGW(TAG, "Client %p queue overflow.", nc);
+
+    // Free up space in the queue
+    I2S::sample_t dummy[2 * I2S::BUFFER_SAMPLE_COUNT];
+    if (xQueueReceive(queue, &dummy, pdMS_TO_TICKS(50)) != pdTRUE)
+      ESP_LOGE(TAG, "Failed to pop from full queue.");
+
+    // Queue without blocking this time
+    if (xQueueSendToBack(queue, samples, 0) != pdTRUE)
+      ESP_LOGE(TAG, "Failed to queue samples for %p.", nc);
+  }
+
+  xSemaphoreGive(clientMutex);
 }
