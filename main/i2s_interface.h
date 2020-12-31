@@ -10,9 +10,9 @@ namespace I2S
 {
   constexpr int SAMPLE_FREQUENCTY = 48e3;
 
-  // Total buffer space = 10 * 480 * 4 bytes -> 19.2 kB
+  // Total buffer space = 3 * 480 * 4 bytes -> 5.76 kB
   constexpr int BUFFER_SAMPLE_COUNT = 480;  // Number of samples to make a 10 ms chunk @ 48 kHz
-  constexpr int BUFFER_COUNT = 10;  // 10 * 10 ms -> 100 ms of buffering
+  constexpr int BUFFER_COUNT = 3;  // 3 * 10 ms -> 30 ms of buffering
 
   typedef int16_t sample_t;
   typedef std::array<sample_t, 2 * BUFFER_SAMPLE_COUNT> sample_buffer_t;
