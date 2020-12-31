@@ -9,6 +9,26 @@
 
 #define TAG "Main"
 
+/**
+  @brief  Task function that reads and queues data from I2S
+  
+  @param  pvParameters
+  @retval none
+*/
+static void i2s_read_task(void* pvParameters)
+{
+  while (true)
+  {
+    static I2S::sample_buffer_t samples;
+    size_t read = I2S::read(samples.data(), sizeof(samples), portMAX_DELAY);
+
+    // We should always read the full size
+    assert(read == sizeof(samples));
+    
+    HTTP::queue_samples(samples);
+  }
+}
+
 extern "C" void app_main()
 {
   // Initalize NVS
@@ -29,14 +49,6 @@ extern "C" void app_main()
   // Start the HTTP task
   xTaskCreate(HTTP::task, "HTTPTask", 8192, NULL, 4, NULL);
 
-  while (true)
-  {
-    static I2S::sample_buffer_t samples;
-    size_t read = I2S::read(samples.data(), sizeof(samples), portMAX_DELAY);
-
-    // We should always read the full size
-    assert(read == sizeof(samples));
-    
-    HTTP::queue_samples(samples);
-  }
+  // Create another task which will copy data from I2S to HTTP queues
+  xTaskCreate(i2s_read_task, "I2STask", 4096, NULL, 2, NULL);
 }
