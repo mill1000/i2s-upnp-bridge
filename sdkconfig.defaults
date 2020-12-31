@@ -1,1 +1,7 @@
+# Halt on panic for easier debug
 CONFIG_ESP32_PANIC_PRINT_HALT=y
+# Increase FreeRTOS tick rate
+CONFIG_FREERTOS_HZ=1000
+# Fastest CPU possible
+CONFIG_ESP32_DEFAULT_CPU_FREQ_240=y
+CONFIG_ESP32_DEFAULT_CPU_FREQ_MHZ=240
