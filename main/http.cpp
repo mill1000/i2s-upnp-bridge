@@ -49,13 +49,13 @@ static void streamEventHandler(struct mg_connection* nc, int ev, void* ev_data)
     assert(queue != nullptr);
     
     // Fill up the outgoing buffer
-    while (nc->send_mbuf.len < HTTP::MAX_SEND_BUFFER_LENGTH)
+    while (nc->send_mbuf.len < HTTP::CLIENT_MAX_SEND_BUFFER_LENGTH)
     {
-      I2S::sample_t samples[2 * I2S::BUFFER_SAMPLE_COUNT];
-      if (xQueueReceive(queue, &samples, 0) != pdTRUE)
+      I2S::sample_buffer_t samples;
+      if (xQueueReceive(queue, samples.data(), 0) != pdTRUE)
         break;
       
-      mg_send(nc, samples, sizeof(samples));
+      mg_send(nc, samples.data(), sizeof(samples));
     }
   };
 
@@ -135,7 +135,7 @@ static void wavStreamEventHandler(struct mg_connection* nc, int ev, void* ev_dat
       }
 
       // Construct a queue for this client
-      QueueHandle_t queue = xQueueCreate(10, 2 * sizeof(I2S::sample_t) * I2S::BUFFER_SAMPLE_COUNT);
+      QueueHandle_t queue = xQueueCreate(HTTP::CLIENT_QUEUE_LENGTH, sizeof(I2S::sample_buffer_t));
       if (queue == nullptr)
       {
         ESP_LOGE(TAG, "Failed to create queue for client %s.", addr);
@@ -194,7 +194,7 @@ static void pcmStreamEventHandler(struct mg_connection* nc, int ev, void* ev_dat
       }
 
       // Construct a queue for this client
-      QueueHandle_t queue = xQueueCreate(20, 2 * sizeof(I2S::sample_t) * I2S::BUFFER_SAMPLE_COUNT);
+      QueueHandle_t queue = xQueueCreate(HTTP::CLIENT_QUEUE_LENGTH, sizeof(I2S::sample_buffer_t));
       if (queue == NULL)
       {
         ESP_LOGE(TAG, "Failed to create queue for client %s.", addr);
@@ -303,7 +303,7 @@ void HTTP::task(void* pvParameters)
   @param  samples Buffer to enque
   @retval none
 */
-void HTTP::queue_samples(const I2S::sample_t* samples)
+void HTTP::queue_samples(const I2S::sample_buffer_t& samples)
 {
   // Lock the client list
   if (xSemaphoreTake(clientMutex, pdMS_TO_TICKS(200)) != pdTRUE)
@@ -319,18 +319,18 @@ void HTTP::queue_samples(const I2S::sample_t* samples)
     assert(queue != nullptr);
 
     // Attempt to queue the sample data
-    if (xQueueSendToBack(queue, samples, pdMS_TO_TICKS(50)) == pdTRUE)
+    if (xQueueSendToBack(queue, samples.data(), pdMS_TO_TICKS(50)) == pdTRUE)
       continue;
     
     ESP_LOGW(TAG, "Client %p queue overflow.", nc);
 
     // Free up space in the queue
-    I2S::sample_t dummy[2 * I2S::BUFFER_SAMPLE_COUNT];
-    if (xQueueReceive(queue, &dummy, pdMS_TO_TICKS(50)) != pdTRUE)
+    I2S::sample_buffer_t dummy;
+    if (xQueueReceive(queue, dummy.data(), pdMS_TO_TICKS(50)) != pdTRUE)
       ESP_LOGE(TAG, "Failed to pop from full queue.");
 
     // Queue without blocking this time
-    if (xQueueSendToBack(queue, samples, 0) != pdTRUE)
+    if (xQueueSendToBack(queue, samples.data(), 0) != pdTRUE)
       ESP_LOGE(TAG, "Failed to queue samples for %p.", nc);
   }
 

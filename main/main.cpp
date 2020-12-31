@@ -31,9 +31,9 @@ extern "C" void app_main()
 
   while (true)
   {
-    static I2S::sample_t samples[2 * I2S::BUFFER_SAMPLE_COUNT];
-    size_t read = I2S::read(samples, sizeof(samples), portMAX_DELAY);
-    
+    static I2S::sample_buffer_t samples;
+    size_t read = I2S::read(samples.data(), sizeof(samples), portMAX_DELAY);
+
     // We should always read the full size
     assert(read == sizeof(samples));
     

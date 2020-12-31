@@ -4,6 +4,8 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
+#include <array>
+
 namespace I2S
 {
   constexpr int SAMPLE_FREQUENCTY = 48e3;
@@ -13,9 +15,10 @@ namespace I2S
   constexpr int BUFFER_COUNT = 10;  // 10 * 10 ms -> 100 ms of buffering
 
   typedef int16_t sample_t;
+  typedef std::array<sample_t, 2 * BUFFER_SAMPLE_COUNT> sample_buffer_t;
 
   void init(void);
-  size_t read(sample_t samples[], size_t length = BUFFER_SAMPLE_COUNT * sizeof(sample_t), TickType_t waitTicks = portMAX_DELAY);
+  size_t read(sample_t* samples, size_t length = sizeof(sample_buffer_t), TickType_t waitTicks = portMAX_DELAY);
 }
 
 #endif
