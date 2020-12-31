@@ -42,24 +42,6 @@ static void httpSendResponse(struct mg_connection* nc, uint16_t code, const char
 */
 static void httpStreamEventHandler(struct mg_connection* nc, int ev, void* ev_data, void* user_data)
 {
-  // Lambda to fill outbound client buffer from it's associated queue
-  auto fill_client_buffer = [nc]()
-  {
-    // Get queue handle from the connection
-    QueueHandle_t queue = (QueueHandle_t) nc->user_data;
-    assert(queue != nullptr);
-    
-    // Fill up the outgoing buffer
-    while (nc->send_mbuf.len < HTTP::CLIENT_MAX_SEND_BUFFER_LENGTH)
-    {
-      I2S::sample_buffer_t samples;
-      if (xQueueReceive(queue, samples.data(), 0) != pdTRUE)
-        break;
-      
-      mg_send(nc, samples.data(), sizeof(samples));
-    }
-  };
-
   switch(ev)
   {
     case MG_EV_HTTP_REQUEST:
@@ -111,7 +93,14 @@ static void httpStreamEventHandler(struct mg_connection* nc, int ev, void* ev_da
 
     case MG_EV_SEND:
     {
-      fill_client_buffer();
+      // Get queue handle from the connection
+      QueueHandle_t queue = (QueueHandle_t) nc->user_data;
+      assert(queue != nullptr);
+  
+      I2S::sample_buffer_t samples;
+      while (xQueueReceive(queue, samples.data(), 0) == pdTRUE)
+        mg_send(nc, samples.data(), sizeof(samples));
+  
       break;
     }
 
@@ -119,7 +108,15 @@ static void httpStreamEventHandler(struct mg_connection* nc, int ev, void* ev_da
     {
       // If send buffer if empty, attempt to start sending data
       if (nc->send_mbuf.len == 0)
-        fill_client_buffer();
+      {
+        // Get queue handle from the connection
+        QueueHandle_t queue = (QueueHandle_t) nc->user_data;
+        assert(queue != nullptr);
+    
+        I2S::sample_buffer_t samples;
+        while (xQueueReceive(queue, samples.data(), 0) == pdTRUE)
+          mg_send(nc, samples.data(), sizeof(samples));
+      }
       break;
     }
 
