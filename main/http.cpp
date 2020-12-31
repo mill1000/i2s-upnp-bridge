@@ -205,14 +205,10 @@ void HTTP::task(void* pvParameters)
   mg_set_protocol_http_websocket(connection);
 
   // Construct the PCM stream object
-  StreamConfig pcm;
-  pcm.name = "PCM";
-  pcm.headers = "Content-Type: audio/L16;rate=48000;channels=2\r\nAccept-Ranges: none\r\nCache-Control: no-cache,no-store,must-revalidate,max-age=0\r\n";
+  StreamConfig pcm("PCM", "Content-Type: audio/L16;rate=48000;channels=2\r\nAccept-Ranges: none\r\nCache-Control: no-cache,no-store,must-revalidate,max-age=0\r\n");
 
   // Construct the WAV stream object
-  StreamConfig wav;
-  wav.name = "WAV";
-  wav.headers = "Content-Type: audio/wav\r\nAccept-Ranges: none\r\nCache-Control: no-cache,no-store,must-revalidate,max-age=0\r\n";
+  StreamConfig wav("WAV", "Content-Type: audio/wav\r\nAccept-Ranges: none\r\nCache-Control: no-cache,no-store,must-revalidate,max-age=0\r\n");
   wav.setup = [](struct mg_connection* nc)
   {
     // Construct and send the WAV header

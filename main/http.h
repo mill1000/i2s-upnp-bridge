@@ -9,9 +9,11 @@ namespace HTTP
   // Object to represent a stream configuration
   struct StreamConfig
   {
-    const char* name;
-    const char* headers;
+    const char* const name;
+    const char* const headers;
     void (*setup)(struct mg_connection* nc) = nullptr;
+
+    StreamConfig(const char* name, const char* headers) : name(name), headers(headers) {}
   };
 
   // Maximum length of outgoing buffer
