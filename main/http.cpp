@@ -32,14 +32,15 @@ static void httpSendResponse(struct mg_connection* nc, uint16_t code, const char
 }
 
 /**
-  @brief  Mongoose event handler to stream PCM data
+  @brief  Mongoose event handler to stream audio data to clients
   
   @param  nc Mongoose connection
   @param  ev Mongoose event calling the function
   @param  ev_data Event data pointer
+  @param  user_data User data pointer
   @retval none
 */
-static void streamEventHandler(struct mg_connection* nc, int ev, void* ev_data)
+static void httpStreamEventHandler(struct mg_connection* nc, int ev, void* ev_data, void* user_data)
 {
   // Lambda to fill outbound client buffer from it's associated queue
   auto fill_client_buffer = [nc]()
@@ -63,8 +64,48 @@ static void streamEventHandler(struct mg_connection* nc, int ev, void* ev_data)
   {
     case MG_EV_HTTP_REQUEST:
     {
-      // We don't expect HTTP requests on this handler
-      httpSendResponse(nc, 500, "Unhandled request.");
+      char addr[32];
+      mg_sock_addr_to_str(&nc->sa, addr, sizeof(addr), MG_SOCK_STRINGIFY_IP | MG_SOCK_STRINGIFY_PORT);
+
+      // Lock the client list
+      xSemaphoreTake(clientMutex, portMAX_DELAY);
+
+      if (clients.count(nc))
+      {
+        ESP_LOGW(TAG, "Client %s already exists.", addr);
+        xSemaphoreGive(clientMutex);
+        return;
+      }
+
+      // Construct a queue for this client
+      QueueHandle_t queue = xQueueCreate(HTTP::CLIENT_QUEUE_LENGTH, sizeof(I2S::sample_buffer_t));
+      if (queue == nullptr)
+      {
+        ESP_LOGE(TAG, "Failed to create queue for client %s.", addr);
+        xSemaphoreGive(clientMutex);
+        return;
+      }
+
+      nc->user_data = queue;
+      clients.insert(nc);
+      xSemaphoreGive(clientMutex);
+
+      // Grab the stream object from the user_data
+      HTTP::StreamConfig* streamConfig = (HTTP::StreamConfig*) user_data;
+      assert(streamConfig != nullptr);
+
+      ESP_LOGI(TAG, "New %s client %s -> %p.", streamConfig->name, addr, nc);
+
+      // Send the HTTP header
+      mg_send_response_line(nc, 200, streamConfig->headers);
+
+      // Perform additional setup if needed
+      if (streamConfig->setup)
+        streamConfig->setup(nc);
+
+      // Reassign event handler for this client
+      nc->handler = httpStreamEventHandler;
+
       break;
     }
 
@@ -108,135 +149,15 @@ static void streamEventHandler(struct mg_connection* nc, int ev, void* ev_data)
 }
 
 /**
-  @brief  Mongoose event handler for the WAV endpoint
-  
-  @param  nc Mongoose connection
-  @param  ev Mongoose event calling the function
-  @param  ev_data Event data pointer
-  @retval none
-*/
-static void wavStreamEventHandler(struct mg_connection* nc, int ev, void* ev_data)
-{
-  switch(ev)
-  {
-    case MG_EV_HTTP_REQUEST:
-    {
-      char addr[32];
-      mg_sock_addr_to_str(&nc->sa, addr, sizeof(addr), MG_SOCK_STRINGIFY_IP | MG_SOCK_STRINGIFY_PORT);
-
-      // Lock the client list
-      xSemaphoreTake(clientMutex, portMAX_DELAY);
-
-      if (clients.count(nc))
-      {
-        ESP_LOGW(TAG, "Client %s already exists.", addr);
-        xSemaphoreGive(clientMutex);
-        return;
-      }
-
-      // Construct a queue for this client
-      QueueHandle_t queue = xQueueCreate(HTTP::CLIENT_QUEUE_LENGTH, sizeof(I2S::sample_buffer_t));
-      if (queue == nullptr)
-      {
-        ESP_LOGE(TAG, "Failed to create queue for client %s.", addr);
-        xSemaphoreGive(clientMutex);
-        return;
-      }
-
-      nc->user_data = queue;
-      clients.insert(nc);
-      xSemaphoreGive(clientMutex);
-      ESP_LOGI(TAG, "New WAV client %s -> %p.", addr, nc);
-
-      // Send the HTTP header
-      mg_send_response_line(nc, 200, "Content-Type: audio/wav\r\nAccept-Ranges: none\r\nCache-Control: no-cache,no-store,must-revalidate,max-age=0\r\n");
-
-      // Construct and send the WAV header
-      WAV::Header wav_header(48000);
-      mg_send(nc, &wav_header, sizeof(wav_header));
-
-      // Reassign event handler for this client
-      nc->handler = streamEventHandler;
-
-      break;
-    }
-
-    default:
-      break;
-  }
-}
-
-/**
-  @brief  Mongoose event handler for the raw PCM endpoint
-  
-  @param  nc Mongoose connection
-  @param  ev Mongoose event calling the function
-  @param  ev_data Event data pointer
-  @retval none
-*/
-static void pcmStreamEventHandler(struct mg_connection* nc, int ev, void* ev_data)
-{
-  switch(ev)
-  {
-    case MG_EV_HTTP_REQUEST:
-    {
-      char addr[32];
-      mg_sock_addr_to_str(&nc->sa, addr, sizeof(addr), MG_SOCK_STRINGIFY_IP | MG_SOCK_STRINGIFY_PORT);
-
-      // Lock the client list
-      xSemaphoreTake(clientMutex, portMAX_DELAY);
-
-      if (clients.count(nc))
-      {
-        ESP_LOGW(TAG, "Client %s already exists.", addr);
-        xSemaphoreGive(clientMutex);
-        return;
-      }
-
-      // Construct a queue for this client
-      QueueHandle_t queue = xQueueCreate(HTTP::CLIENT_QUEUE_LENGTH, sizeof(I2S::sample_buffer_t));
-      if (queue == NULL)
-      {
-        ESP_LOGE(TAG, "Failed to create queue for client %s.", addr);
-        xSemaphoreGive(clientMutex);
-        return;
-      }
-
-      nc->user_data = queue;
-      clients.insert(nc);
-      xSemaphoreGive(clientMutex);
-      ESP_LOGI(TAG, "New PCM client %s -> %p.", addr, nc);
-
-      // Send the header. Shamelessly stolen from what AirAudio sends
-      mg_send_response_line(nc, 200, "Content-Type: audio/L16;rate=48000;channels=2\r\nAccept-Ranges: none\r\nCache-Control: no-cache,no-store,must-revalidate,max-age=0 \r\n");
-
-      // Adding a byte of padding makes foobar happy?
-      // while (nc->send_mbuf.len % 2 != 1)
-      // {
-      //   uint8_t zero = 0;
-      //   mg_send(nc, &zero, sizeof(zero));
-      // }
-
-      // Reassign event handler for this client
-      nc->handler = streamEventHandler;
-
-      break;
-    }
-
-    default:
-      break;
-  }
-}
-
-/**
   @brief  Generic Mongoose event handler for the HTTP server
   
   @param  nc Mongoose connection
   @param  ev Mongoose event calling the function
   @param  ev_data Event data pointer
+  @param  user_data User data pointer
   @retval none
 */
-static void httpEventHandler(struct mg_connection* nc, int ev, void* ev_data)
+static void httpEventHandler(struct mg_connection* nc, int ev, void* ev_data, void* user_data)
 {
   switch(ev)
   {
@@ -271,7 +192,7 @@ void HTTP::task(void* pvParameters)
   mg_mgr_init(&manager, NULL);
 
   // Connect bind to an address and specify the event handler
-  struct mg_connection* connection = mg_bind(&manager, "80", httpEventHandler);
+  struct mg_connection* connection = mg_bind(&manager, "80", httpEventHandler, nullptr);
   if (connection == NULL)
   {
     ESP_LOGE(TAG, "Failed to bind port.");
@@ -283,9 +204,25 @@ void HTTP::task(void* pvParameters)
   // Enable HTTP on the connection
   mg_set_protocol_http_websocket(connection);
 
+  // Construct the PCM stream object
+  StreamConfig pcm;
+  pcm.name = "PCM";
+  pcm.headers = "Content-Type: audio/L16;rate=48000;channels=2\r\nAccept-Ranges: none\r\nCache-Control: no-cache,no-store,must-revalidate,max-age=0\r\n";
+
+  // Construct the WAV stream object
+  StreamConfig wav;
+  wav.name = "WAV";
+  wav.headers = "Content-Type: audio/wav\r\nAccept-Ranges: none\r\nCache-Control: no-cache,no-store,must-revalidate,max-age=0\r\n";
+  wav.setup = [](struct mg_connection* nc)
+  {
+    // Construct and send the WAV header
+    WAV::Header wav_header(48000);
+    mg_send(nc, &wav_header, sizeof(wav_header));
+  };
+
   // Add seperate end points for raw PCM and WAV stream
-  mg_register_http_endpoint(connection, "/stream.pcm", pcmStreamEventHandler);
-  mg_register_http_endpoint(connection, "/stream.wav", wavStreamEventHandler);
+  mg_register_http_endpoint(connection, "/stream.pcm", httpStreamEventHandler, &pcm);
+  mg_register_http_endpoint(connection, "/stream.wav", httpStreamEventHandler, &wav);
 
   // Loop waiting for events
   while(1)
