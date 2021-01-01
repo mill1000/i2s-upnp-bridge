@@ -8,6 +8,7 @@
 #include "http.h"
 #include "i2s_interface.h"
 #include "wifi.h"
+#include "upnp_control.h"
 
 #define TAG "Main"
 
@@ -52,6 +53,8 @@ void System::task(void* pvParameters)
       {
         ESP_LOGI(TAG, "System idle.");
         state = State::Idle;
+
+        UpnpControl::stop();
       }
     }
     else
@@ -65,6 +68,8 @@ void System::task(void* pvParameters)
         // Increase timeout in active state
         state = State::Active;
         timeout = ACTIVE_TIMEOUT;
+
+        UpnpControl::play();
       }
     }
   }
@@ -92,4 +97,7 @@ extern "C" void app_main()
 
   // Create a task which moves data from I2S to HTTP server
   xTaskCreate(System::task, "SystemTask", 4096, NULL, 2, NULL);
+
+  // Create a task which handles sending UPNP events
+  xTaskCreate(UpnpControl::task, "UpnpTask", 4096, NULL, 1, NULL);
 }
