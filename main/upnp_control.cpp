@@ -12,11 +12,23 @@
 #include "upnp_control.h"
 #include "upnp.h"
 #include "mongoose.h"
+#include "tinyxml2.h"
 #include "utils.h"
 
 #define TAG "UPNP"
 
 static EventGroupHandle_t upnpEventGroup;
+
+/**
+  @brief  Convert a mg_str to std::string
+  
+  @param  mg_str Mongoose string to convert
+  @retval std::string - Empty if mg_str is null
+*/
+static inline std::string mg_str_string(const mg_str* s)
+{
+  return (s == nullptr) ? std::string() : std::string(s->p, s->len);
+}
 
 /**
   @brief  Generic Mongoose event handler for the HTTP server
@@ -64,7 +76,93 @@ static void ssdpDescriptionEventHandler(struct mg_connection* nc, int ev, void* 
     {
       struct http_message* hm = (struct http_message*) ev_data;;
       
-      ESP_LOGD(TAG, "Description Reply: %s", std::string(hm->message.p, hm->message.len).c_str());
+      const std::string description = std::string(hm->body.p, hm->body.len);
+      ESP_LOGD(TAG, "Description Reply: %s", description.c_str());
+
+      tinyxml2::XMLDocument xml_document;
+      xml_document.Parse(description.c_str());
+
+      tinyxml2::XMLElement* root = xml_document.FirstChildElement("root");
+      if (root == nullptr)
+      {
+        ESP_LOGE(TAG, "Invalid description XML. No root element.");
+        return;
+      }
+
+      // Start decoding the device element for useful information
+      tinyxml2::XMLElement* device = root->FirstChildElement("device");
+      if (device == nullptr)
+      {
+        ESP_LOGE(TAG, "Invalid description XML. Could not locate device element.");
+        return;
+      }
+
+      // Extract friendly name from device description
+      tinyxml2::XMLElement* friendlyName = device->FirstChildElement("friendlyName");
+      if (friendlyName == nullptr)
+      {
+        ESP_LOGE(TAG, "Invalid description XML. Could not locate friendlyName element.");
+        return;
+      }
+
+      std::string name = std::string(friendlyName->GetText());
+
+      // TODO icons
+
+      // Grab service list to search for AVTransport
+      tinyxml2::XMLElement* serviceList = device->FirstChildElement("serviceList");
+      if (serviceList == nullptr)
+      {
+        ESP_LOGE(TAG, "Invalid description XML. Could not locate serviceList element.");
+        return;
+      }
+
+      // Extract the control URL from the AVTransport service
+      std::string control_url;
+      tinyxml2::XMLElement* service = serviceList->FirstChildElement();
+      while (service != nullptr) // Scan all services in serviceList
+      {
+        tinyxml2::XMLElement* serviceType = service->FirstChildElement("serviceType");
+        if (serviceType == nullptr || std::string(serviceType->GetText()).compare("urn:schemas-upnp-org:service:AVTransport:1") != 0)
+        {
+          // Can't find serviceType element, or not AVTransport service
+          service = service->NextSiblingElement();
+          continue;
+        }
+
+        // Grab control URL from matching service
+        tinyxml2::XMLElement* controlURL = service->FirstChildElement("controlURL");
+        if (controlURL != nullptr)
+        {
+          control_url = std::string(controlURL->GetText());
+          break;
+        }
+        
+        // Fetch next service
+        service = service->NextSiblingElement();
+        continue;
+      }
+
+      if (control_url.empty())
+      {
+        ESP_LOGE(TAG, "Could not find control URL for AVTransport service.");
+        return;
+      }
+      
+      // Grab the base URL if it exists
+      std::string base_url;
+      tinyxml2::XMLElement* urlBase = root->FirstChildElement("URLBase");
+      if (urlBase != nullptr)
+        base_url = std::string(urlBase->GetText());
+
+      if (base_url.empty())
+      {
+        char addr[32];
+        mg_sock_addr_to_str(&nc->sa, addr, sizeof(addr), MG_SOCK_STRINGIFY_IP | MG_SOCK_STRINGIFY_PORT);
+        base_url = std::string(addr) + mg_str_string(&hm->uri);
+      }
+
+      ESP_LOGI(TAG, "Found renderer: %s - %s", name.c_str(), (base_url + control_url).c_str());
 
       break;
     }
@@ -98,11 +196,6 @@ static void ssdpDiscoveryEventHandler(struct mg_connection* nc, int ev, void* ev
   "ST: %s\r\n"\
   "MX: %d\r\n"\
   "\r\n";
-  
-  // Construct a std::string from a mg_str
-  auto mg_str_string = [](const mg_str* s){
-    return (s == nullptr) ? std::string() : std::string(s->p, s->len);
-  };
 
   switch(ev)
   {
