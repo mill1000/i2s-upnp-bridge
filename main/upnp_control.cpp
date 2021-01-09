@@ -86,6 +86,7 @@ static void ssdpDescriptionEventHandler(struct mg_connection* nc, int ev, void* 
 static void ssdpDiscoveryEventHandler(struct mg_connection* nc, int ev, void* ev_data, void* user_data)
 {
   constexpr uint32_t MG_F_SSDP_SEARCH = MG_F_USER_1;
+  constexpr int32_t SSDP_MX = 5;
 
   //ST: upnp:rootdevice
   //ST: urn:schemas-upnp-org:device:MediaRenderer:1
@@ -94,8 +95,8 @@ static void ssdpDiscoveryEventHandler(struct mg_connection* nc, int ev, void* ev
   "M-SEARCH * HTTP/1.1\r\n"\
   "HOST: 239.255.255.250:1900\r\n"\
   "MAN: \"ssdp:discover\"\r\n"\
-  "MX: 5\r\n"\
   "ST: %s\r\n"\
+  "MX: %d\r\n"\
   "\r\n";
   
   // Construct a std::string from a mg_str
@@ -290,10 +291,10 @@ static void ssdpDiscoveryEventHandler(struct mg_connection* nc, int ev, void* ev
 
       // Send a burst of search requests
       for (uint8_t i = 0; i < 3; i++)
-        mg_printf(search, ssdpSearchRequest, searchTarget);
+        mg_printf(search, ssdpSearchRequest, searchTarget, SSDP_MX);
 
       // Stop search after 5 seconds
-      mg_set_timer(search, mg_time() + 5);
+      mg_set_timer(search, mg_time() + SSDP_MX);
 
       break;
     }
