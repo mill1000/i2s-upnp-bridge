@@ -2,3 +2,9 @@
 	path = components/mongoose/mongoose
 	url = https://github.com/cesanta/mongoose.git
 	branch = 6.18
+
+	[submodule "components/tinyxml2/tinyxml2"]
+	path = components/tinyxml2/tinyxml2
+	url = https://github.com/leethomason/tinyxml2.git
+	branch = 8.0.0
+	
