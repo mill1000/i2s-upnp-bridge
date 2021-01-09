@@ -99,5 +99,5 @@ extern "C" void app_main()
   xTaskCreate(System::task, "SystemTask", 4096, NULL, 2, NULL);
 
   // Create a task which handles sending UPNP events
-  xTaskCreate(UpnpControl::task, "UpnpTask", 4096, NULL, 1, NULL);
+  xTaskCreate(UpnpControl::task, "UpnpTask", 8192, NULL, 1, NULL);
 }
