@@ -106,6 +106,29 @@ static void ssdpDescriptionEventHandler(struct mg_connection* nc, int ev, void* 
 
       std::string name = std::string(friendlyName->GetText());
 
+      // Extract UDN from device description
+      tinyxml2::XMLElement* UDN = device->FirstChildElement("UDN");
+      if (UDN == nullptr)
+      {
+        ESP_LOGE(TAG, "Invalid description XML. Could not locate UDN element.");
+        return;
+      }
+
+      // Sscanf the UUID since std::regex is stack hungry
+      char uuid_buffer[256] = {0};
+      if (sscanf(UDN->GetText(), "uuid:%255s", uuid_buffer) != 1)
+      {
+        ESP_LOGE(TAG, "Could not extract UUID from UDN: %s", UDN->GetText());
+        return;
+      }
+
+      std::string uuid(uuid_buffer);
+      if (uuid.empty())
+      {
+        ESP_LOGE(TAG, "Invalid UUID for renderer: %s.", name.c_str());
+        return;
+      }
+
       // TODO icons
 
       // Grab service list to search for AVTransport
