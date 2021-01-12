@@ -7,8 +7,9 @@
 #include "main.h"
 #include "http.h"
 #include "i2s_interface.h"
-#include "wifi.h"
+#include "nvs_interface.h"
 #include "upnp_control.h"
+#include "wifi.h"
 
 #define TAG "Main"
 
@@ -77,7 +78,7 @@ void System::task(void* pvParameters)
 
 extern "C" void app_main()
 {
-  // Initalize NVS
+  // Initialize NVS
   esp_err_t result = nvs_flash_init();
   if (result == ESP_ERR_NVS_NO_FREE_PAGES)
   {
@@ -86,10 +87,13 @@ extern "C" void app_main()
   }
   ESP_ERROR_CHECK(result);
 
-  // Initalize WiFi and connect to configured network
+  // Initialize our own NVS interface
+  NVS::init();
+
+  // Initialize WiFi and connect to configured network
   WiFi::init_station();
 
-  // Initalize I2S Rx
+  // Initialize I2S Rx
   I2S::init();
 
   // Start the HTTP task
