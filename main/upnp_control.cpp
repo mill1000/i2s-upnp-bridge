@@ -7,7 +7,6 @@
 #include "lwip/igmp.h"
 
 #include <string>
-#include <regex>
 
 #include "upnp_control.h"
 #include "upnp.h"
@@ -250,15 +249,15 @@ static void ssdpDiscoveryEventHandler(struct mg_connection* nc, int ev, void* ev
         return;
       }
 
-      // Fetch max-age from CACHE-CONTROL field
-      std::smatch age_match;
-      if (std::regex_match(cache_control, age_match, std::regex(R"(max-age=(\d+))")) == false)
+      // Sscanf the max-age since std::regex is stack hungry
+      uint32_t max_age = 0;
+      if (sscanf(cache_control.c_str(), "max-age=%d", &max_age) != 1)
       {
         ESP_LOGE(TAG, "Could not extract max-age from SSDP CACHE-CONTROL: %s", cache_control.c_str());
         return;
       }
-
-      if (location.empty() || age_match.empty())
+      
+      if (location.empty() || max_age == 0)
       {
         // Unable to find required fields in response
         ESP_LOGE(TAG, "SSDP NOTIFY missing required fields. Request: %s", mg_str_string(&hm->message).c_str());
@@ -320,30 +319,15 @@ static void ssdpDiscoveryEventHandler(struct mg_connection* nc, int ev, void* ev
         return;
       }
 
-      // Fetch max-age from CACHE-CONTROL field
-      std::smatch age_match;
-      if (std::regex_match(cache_control, age_match, std::regex(R"(max-age=(\d+))")) == false)
+      // Sscanf the max-age since std::regex is stack hungry
+      uint32_t max_age = 0;
+      if (sscanf(cache_control.c_str(), "max-age=%d", &max_age) != 1)
       {
         ESP_LOGE(TAG, "Could not extract max-age from SSDP CACHE-CONTROL: %s", cache_control.c_str());
         return;
       }
 
-      // std::string usn = mg_str_string(mg_get_http_header(hm, "USN"));
-      // if (usn.empty())
-      // {
-      //   ESP_LOGE(TAG, "No USN in SSDP search response.");
-      //   return;
-      // }
-
-      // // Fetch UUID from USN field
-      // std::smatch uuid_match;
-      // if (std::regex_match(usn, uuid_match, std::regex("uuid:(.*?)::urn:.*")) == false)
-      // {
-      //   ESP_LOGE(TAG, "Could not extract UUID from SSDP USN: %s", usn.c_str());
-      //   return;
-      // }
-
-      if (location.empty() || age_match.empty())
+      if (location.empty() || max_age == 0)
       {
         // Unable to find required fields in response
         ESP_LOGE(TAG, "SSDP response missing required fields. Response: %s", std::string(hm->message.p, hm->body.p).c_str());
