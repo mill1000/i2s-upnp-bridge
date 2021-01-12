@@ -7,9 +7,11 @@
 #include "lwip/igmp.h"
 
 #include <string>
+#include <unordered_map>
 
 #include "upnp_control.h"
 #include "upnp.h"
+#include "upnp_renderer.h"
 #include "mongoose.h"
 #include "tinyxml2.h"
 #include "utils.h"
@@ -17,6 +19,8 @@
 #define TAG "UPNP"
 
 static EventGroupHandle_t upnpEventGroup;
+static std::unordered_map<std::string, UPNP::Renderer> renderers;
+static SemaphoreHandle_t rendererMutex;
 
 /**
   @brief  Convert a mg_str to std::string
@@ -177,6 +181,7 @@ static void ssdpDescriptionEventHandler(struct mg_connection* nc, int ev, void* 
       if (urlBase != nullptr)
         base_url = std::string(urlBase->GetText());
 
+      // Build the base URL from the remote socket address if it's empty
       if (base_url.empty())
       {
         char addr[32];
@@ -184,7 +189,22 @@ static void ssdpDescriptionEventHandler(struct mg_connection* nc, int ev, void* 
         base_url = std::string(addr) + mg_str_string(&hm->uri);
       }
 
-      ESP_LOGI(TAG, "Found renderer: %s - %s", name.c_str(), (base_url + control_url).c_str());
+      // Combine base and control URL
+      control_url = base_url + control_url;
+
+      ESP_LOGI(TAG, "Found renderer: %s - %s", name.c_str(), control_url.c_str());
+
+      // Lock the renderer list
+      xSemaphoreTake(rendererMutex, portMAX_DELAY);
+
+      // Fetch renderer from map and create if needed
+      auto it = renderers.emplace(uuid, UPNP::Renderer(uuid)).first;
+      
+      // Update name and control URL
+      it->second.name = name;
+      it->second.control_url = control_url;
+
+      xSemaphoreGive(rendererMutex);
 
       break;
     }
@@ -416,6 +436,11 @@ void UpnpControl::task(void* pvParameters)
   upnpEventGroup = xEventGroupCreate();
   if (upnpEventGroup == NULL)
     ESP_LOGE(TAG, "Failed to create event group.");
+
+  // Create a mutex to lock renderer list access
+  rendererMutex = xSemaphoreCreateMutex();
+  if (rendererMutex == nullptr)
+    ESP_LOGE(TAG, "Failed to create renderer mutex.");
 
   // Create and init a Mongoose manager
   struct mg_mgr manager;
