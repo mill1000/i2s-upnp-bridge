@@ -129,7 +129,7 @@ static void ssdpDescriptionEventHandler(struct mg_connection* nc, int ev, void* 
       std::string uuid(uuid_buffer);
       if (uuid.empty())
       {
-        ESP_LOGE(TAG, "Invalid UUID for renderer: %s.", name.c_str());
+        ESP_LOGE(TAG, "Invalid UUID for renderer: %s.", uuid.c_str());
         return;
       }
 
