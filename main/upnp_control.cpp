@@ -7,7 +7,7 @@
 #include "lwip/igmp.h"
 
 #include <string>
-#include <unordered_map>
+#include <map>
 
 #include "upnp_control.h"
 #include "upnp.h"
@@ -19,7 +19,7 @@
 #define TAG "UPNP"
 
 static EventGroupHandle_t upnpEventGroup;
-static std::unordered_map<std::string, UPNP::Renderer> renderers;
+static UpnpControl::renderer_map_t discoveredRenderers;
 static SemaphoreHandle_t rendererMutex;
 
 /**
@@ -198,7 +198,7 @@ static void ssdpDescriptionEventHandler(struct mg_connection* nc, int ev, void* 
       xSemaphoreTake(rendererMutex, portMAX_DELAY);
 
       // Fetch renderer from map and create if needed
-      auto it = renderers.emplace(uuid, UPNP::Renderer(uuid)).first;
+      auto it = discoveredRenderers.emplace(uuid, UPNP::Renderer(uuid)).first;
       
       // Update name and control URL
       it->second.name = name;
@@ -555,4 +555,34 @@ void UpnpControl::stop()
 {
   if (upnpEventGroup != NULL)
     xEventGroupSetBits(upnpEventGroup, (uint32_t) Event::Stop);
+}
+
+/**
+  @brief  Update the provided map of renderers
+  
+  @param  renderers Map of renderers to update information on
+  @retval none
+*/
+void UpnpControl::populate_renderer_info(UpnpControl::renderer_map_t& renderers)
+{
+  // Lock the renderer list
+  xSemaphoreTake(rendererMutex, portMAX_DELAY);
+
+  for (auto& kv : discoveredRenderers)
+  {
+    auto result = renderers.emplace(kv.first, kv.second);
+
+    // Emplace created a new entry so nothing else to do
+    if (result.second == true)
+      continue;
+
+    // Item already exists, so update it
+    auto it = result.first;
+    
+    // Update name and control URL
+    it->second.name = kv.second.name;
+    it->second.control_url = kv.second.control_url;
+  }
+
+  xSemaphoreGive(rendererMutex);
 }

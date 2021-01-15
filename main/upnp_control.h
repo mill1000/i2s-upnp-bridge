@@ -2,6 +2,9 @@
 #define __UPNP_CONTROL_H__
 
 #include <string>
+#include <map>
+
+#include "upnp_renderer.h"
 
 namespace UpnpControl
 {
@@ -23,6 +26,10 @@ namespace UpnpControl
   void task(void* pvParameters);
   void play();
   void stop();
+
+  typedef std::map<std::string, UPNP::Renderer> renderer_map_t;
+
+  void populate_renderer_info(renderer_map_t& renderers);
 }
 
 #endif
