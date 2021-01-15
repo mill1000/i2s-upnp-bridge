@@ -11,8 +11,10 @@ namespace UPNP
       const std::string uuid;
       std::string name;
       std::string control_url;
+      bool selected = false;
 
       Renderer(const std::string& uuid) : uuid(uuid) {}
+      Renderer(const std::string& uuid, const std::string& name) : uuid(uuid), name(name) {}
   };
 }
 

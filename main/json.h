@@ -25,6 +25,8 @@ namespace JSON
   {
     json[key] = validator(value) ? value : nullptr;
   }
+
+  std::string get_renderers();
 }
 
 #endif
