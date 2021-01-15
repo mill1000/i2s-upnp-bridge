@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>I2S UPnP Bridge</title>
+<style>
+  table {border-collapse: collapse; width: 50%;}
+  thead {font-weight: bold;}
+  td {border-bottom: 1px solid; padding: 8px;}
+  /* td.second {text-align: right;} */
+  tr:hover {background-color: #f5f5f5}
+</style>
+</head>
+<body>
+<script>
+var RendererTable = {
+  _table: null,
+
+  _create_row: function(parent, id, data) {
+    let row = parent.insertRow(-1);
+    row.setAttribute("id", id);
+    
+    for (const v of data) {
+      let cell = row.insertCell(-1);
+      cell.innerHTML = v;
+    }
+  },
+
+  _update_row: function(id, data) {
+    let row = _table.rows.namedItem(id);
+
+    let i = 1;
+    for (const v of data) {
+      row.cells[i++].innerHTML = v; 
+    }
+  },
+
+  create: function() {
+    _table = document.createElement("TABLE");
+    _table.setAttribute("id", "rendererTable");
+    
+    let thead = _table.createTHead();
+    this._create_row(thead, "head", ["Name", "UUID", "Location", "Status", "Selected"]);
+    
+    let tbody = _table.createTBody();
+
+    document.body.appendChild(_table);
+  },
+}
+
+RendererTable.create();
+
+// // Start status connection
+// let socket = new WebSocket("ws://" + location.host);
+// socket.onmessage = (ev) => {
+//   let status = JSON.parse(ev.data);
+// };
+</script>
+</body>
+</html>

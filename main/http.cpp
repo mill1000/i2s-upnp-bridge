@@ -6,8 +6,9 @@
 #include <unordered_set>
 
 #include "http.h"
-#include "mongoose.h"
 #include "i2s_interface.h"
+#include "json.h"
+#include "mongoose.h"
 #include "utils.h"
 #include "wav.h"
 
@@ -15,21 +16,6 @@
 
 static std::unordered_set<struct mg_connection*> clients;
 static SemaphoreHandle_t clientMutex;
-
-/**
-  @brief  Sends HTTP responses on the provided connection
-  
-  @param  nc Mongoose connection
-  @param  code HTTP event code to send
-  @param  message HTTP response body to send
-  @retval none
-*/
-static void httpSendResponse(struct mg_connection* nc, uint16_t code, const char* message)
-{
-  mg_send_head(nc, code, strlen(message), "Content-Type: text/html");
-  mg_printf(nc, message);
-  nc->flags |= MG_F_SEND_AND_CLOSE;
-}
 
 /**
   @brief  Mongoose event handler to stream audio data to clients
@@ -156,11 +142,62 @@ static void httpStreamEventHandler(struct mg_connection* nc, int ev, void* ev_da
 */
 static void httpEventHandler(struct mg_connection* nc, int ev, void* ev_data, void* user_data)
 {
+  extern const uint8_t index_html[] asm("_binary_index_html_start");
+  extern const uint8_t index_html_end[] asm("_binary_index_html_end");
+  const uint32_t index_html_len = index_html_end - index_html;
+
   switch(ev)
   {
     case MG_EV_HTTP_REQUEST:
-      httpSendResponse(nc, 200, "OK");
+    {
+      struct http_message *hm = (struct http_message *) ev_data;
+      
+      char action[4];
+      if (mg_get_http_var(&hm->query_string, "action", action, sizeof(action)) == -1)
+      {
+        // Send the header
+        mg_send_head(nc, 200, index_html_len, "Content-Type: text/html");
+
+        // Serve the page
+        mg_send(nc, index_html, index_html_len);
+        nc->flags |= MG_F_SEND_AND_CLOSE;
+        break;
+      }
+      else if (strcmp(action, "get") == 0) // Get JSON values
+      {
+        std::string renderers = JSON::get_renderers();
+
+        ESP_LOGI(TAG, "Get = %s", renderers.c_str());
+
+        mg_send_head(nc, 200, renderers.length(), "Content-Type: application/json");
+        mg_send(nc, renderers.c_str(), renderers.length());
+        nc->flags |= MG_F_SEND_AND_CLOSE;
+    
+    
+        break;
+      }
+      else if (strcmp(action, "set") == 0) // Set JSON values
+      {
+        // Move JSON data into null terminated buffer
+        // std::string buffer(hm->body.p, hm->body.p + hm->body.len);
+
+        // ESP_LOGI(TAG, "Set = %s", buffer.c_str());
+
+        // bool success = JSON::parse_renderers(buffer);
+
+        // const char* errorString = success ? "Update successful." : "JSON parse failed.";
+        
+        // mg_send_head(nc, success ? 200 : 400, strlen(errorString), "Content-Type: text/html");
+        // mg_printf(nc, errorString);
+        // nc->flags |= MG_F_SEND_AND_CLOSE;
+      }
+      else
+      {
+        mg_http_send_redirect(nc, 302, hm->uri, mg_mk_str(NULL));
+        nc->flags |= MG_F_SEND_AND_CLOSE;
+      }
       break;
+    }
 
     default:
       break;
@@ -213,7 +250,7 @@ void HTTP::task(void* pvParameters)
     mg_send(nc, &wav_header, sizeof(wav_header));
   };
 
-  // Add seperate end points for raw PCM and WAV stream
+  // Add separate end points for raw PCM and WAV stream
   mg_register_http_endpoint(connection, "/stream.pcm", httpStreamEventHandler, &pcm);
   mg_register_http_endpoint(connection, "/stream.wav", httpStreamEventHandler, &wav);
 
@@ -230,7 +267,7 @@ void HTTP::task(void* pvParameters)
 /**
   @brief  Queue sample data for transmission to clients
   
-  @param  samples Buffer to enque
+  @param  samples Buffer to enqueue
   @retval none
 */
 void HTTP::queue_samples(const I2S::sample_buffer_t& samples)
