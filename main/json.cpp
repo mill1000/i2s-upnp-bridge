@@ -19,17 +19,8 @@
 */
 std::string JSON::get_renderers()
 {
-  // Get the saved renderers from NVS
-  std::map<std::string, std::string> nvs_renderers = NVS::get_renderers();
-
-  // Create a map of UPNP::Renderer objects
-  UpnpControl::renderer_map_t renderers;
-  std::transform(nvs_renderers.begin(), nvs_renderers.end(), std::inserter(renderers, renderers.end()), [](const auto& kv) {
-    return std::make_pair(kv.first, UPNP::Renderer(kv.first, kv.second));
-  });
-
-  // Populate renderer objects with discovered information
-  UpnpControl::populate_renderer_info(renderers);
+  // Get all renders known to UPNP
+  UpnpControl::renderer_map_t renderers = UpnpControl::get_known_renderers();
  
   nlohmann::json jRenderers = nlohmann::json::object();
 

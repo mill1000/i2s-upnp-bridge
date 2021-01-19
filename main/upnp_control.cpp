@@ -558,31 +558,19 @@ void UpnpControl::stop()
 }
 
 /**
-  @brief  Update the provided map of renderers
+  @brief  Fetch the list of known renderers
   
-  @param  renderers Map of renderers to update information on
-  @retval none
+  @param  none
+  @retval renderer_map_t Map of known renderers
 */
-void UpnpControl::populate_renderer_info(UpnpControl::renderer_map_t& renderers)
+UpnpControl::renderer_map_t UpnpControl::get_known_renderers()
 {
-  // Lock the renderer list
   xSemaphoreTake(rendererMutex, portMAX_DELAY);
-
-  for (auto& kv : discoveredRenderers)
-  {
-    auto result = renderers.emplace(kv.first, kv.second);
-
-    // Emplace created a new entry so nothing else to do
-    if (result.second == true)
-      continue;
-
-    // Item already exists, so update it
-    auto it = result.first;
-    
-    // Update name and control URL
-    it->second.name = kv.second.name;
-    it->second.control_url = kv.second.control_url;
-  }
-
+  
+  // Make a copy
+  renderer_map_t renderers = discoveredRenderers;
+  
   xSemaphoreGive(rendererMutex);
+
+  return renderers;
 }

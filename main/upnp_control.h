@@ -29,7 +29,7 @@ namespace UpnpControl
 
   typedef std::map<std::string, UPNP::Renderer> renderer_map_t;
 
-  void populate_renderer_info(renderer_map_t& renderers);
+  renderer_map_t get_known_renderers();
 }
 
 #endif
