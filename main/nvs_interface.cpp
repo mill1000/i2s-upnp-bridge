@@ -72,8 +72,20 @@ void NVS::erase_renderers()
 */
 void NVS::set_renderers(const std::map<std::string, std::string>& rendererMap)
 {
-  for (auto& k : rendererMap)
-    nvs_renderers.nvs_set<std::string>(k.first, k.second);
+  size_t index = 0;
+  for (const auto& kv : rendererMap)
+  {
+    // NVS system won't allow large keys so we can't key by UUID
+    // instead we will key both items by an index
+    char key[16] = {0};
+    snprintf(key, 16, "name%d", index);
+    nvs_renderers.nvs_set<std::string>(key, kv.first);
+
+    snprintf(key, 16, "uuid%d", index);
+    nvs_renderers.nvs_set<std::string>(key, kv.second);
+
+    index++;
+  }
 
   nvs_renderers.commit();
 }
@@ -86,14 +98,22 @@ void NVS::set_renderers(const std::map<std::string, std::string>& rendererMap)
 */
 std::map<std::string, std::string> NVS::get_renderers()
 {
-  // Find all keys in the renderers NVS
-  const std::vector<std::string> keys = nvs_renderers.nvs_find(NVS_TYPE_STR);
+  // Find all name keys in the renderers NVS
+  const std::vector<std::string> names = nvs_renderers.nvs_find(NVS_TYPE_STR, "name");
 
   std::map<std::string, std::string> rendererMap;
-  for (auto& k : keys)
+  for (size_t i = 0; i < names.size(); i++)
   {
-    if (nvs_renderers.nvs_get<std::string>(k, rendererMap[k]) != ESP_OK)
-      ESP_LOGW(TAG, "Failed to get NVS renderer entry for '%s'", k.c_str());
+    char key[16] = {0};
+    snprintf(key, 16, "name%d", i);
+
+    std::string name;
+    if (nvs_renderers.nvs_get<std::string>(key, name) != ESP_OK)
+      ESP_LOGW(TAG, "Failed to get NVS renderer entry for '%s'", key);
+
+    snprintf(key, 16, "uuid%d", i);
+    if (nvs_renderers.nvs_get<std::string>(key, rendererMap[name]) != ESP_OK)
+      ESP_LOGW(TAG, "Failed to get NVS renderer entry for '%s'", key);
   }
 
   return rendererMap;
