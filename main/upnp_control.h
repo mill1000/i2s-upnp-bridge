@@ -10,14 +10,15 @@ namespace UpnpControl
 {
   enum class Event
   {
-    // Events to start & stop playback on the renderer
+    // Events to control the task loop
     Play = 1 << 0,
     Stop = 1 << 1,
+    UpdateSelectedRenderers = 1 << 2,
 
     // Events to trigger specific UPNP actions
-    SendSetUriAction = 1 << 2,
-    SendPlayAction = 1 << 3,
-    SendStopAction = 1 << 4,
+    SendSetUriAction = 1 << 8,
+    SendPlayAction = 1 << 9,
+    SendStopAction = 1 << 10,
     All = 0x00FFFFFF,
   };
 
@@ -26,6 +27,7 @@ namespace UpnpControl
   void task(void* pvParameters);
   void play();
   void stop();
+  void update_selected_renderers();
 
   typedef std::map<std::string, UPNP::Renderer> renderer_map_t;
 

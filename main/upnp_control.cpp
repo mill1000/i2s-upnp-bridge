@@ -473,6 +473,33 @@ void UpnpControl::task(void* pvParameters)
     if (events & (uint32_t) Event::Stop)
       xEventGroupSetBits(upnpEventGroup, (uint32_t) Event::SendStopAction);
 
+    // Stop playback by sending the Stop action
+    if (events & (uint32_t) Event::UpdateSelectedRenderers)
+    {
+      std::map<std::string, std::string> nvs_renderers = NVS::get_renderers();
+
+      // Lock the renderer list
+      xSemaphoreTake(rendererMutex, portMAX_DELAY);
+
+      // Deselect all known renderers
+      for (auto& kv : discoveredRenderers)
+        kv.second.selected = false;
+
+      // Select all renderers saved in NVS
+      for (const auto& kv : nvs_renderers)
+      {
+        const std::string& uuid = kv.first;
+        const std::string& name = kv.second;
+
+        auto it = discoveredRenderers.emplace(uuid, UPNP::Renderer(uuid, name)).first;
+        it->second.selected = true;
+
+        ESP_LOGI(TAG, "Renderer '%s' selected for playback.", it->second.name.c_str());
+      }
+
+      xSemaphoreGive(rendererMutex);
+    }
+
     if (events & (uint32_t) Event::SendSetUriAction)
     {
       tcpip_adapter_ip_info_t info;
@@ -555,6 +582,18 @@ void UpnpControl::stop()
 {
   if (upnpEventGroup != NULL)
     xEventGroupSetBits(upnpEventGroup, (uint32_t) Event::Stop);
+}
+
+/**
+  @brief  Update the renderers selected for playback
+  
+  @param  none
+  @retval none
+*/
+void UpnpControl::update_selected_renderers()
+{
+  if (upnpEventGroup != NULL)
+    xEventGroupSetBits(upnpEventGroup, (uint32_t) Event::UpdateSelectedRenderers);
 }
 
 /**
