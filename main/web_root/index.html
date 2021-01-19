@@ -3,6 +3,9 @@
 <head>
 <meta charset="UTF-8">
 <title>I2S UPnP Bridge</title>
+<!-- Tabulator -->
+<link href="https://cdnjs.cloudflare.com/ajax/libs/tabulator/4.8.1/css/tabulator_simple.min.css" rel="stylesheet">
+<script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/tabulator/4.8.1/js/tabulator.min.js"></script>
 <style>
   table {border-collapse: collapse; width: 50%;}
   thead {font-weight: bold;}
@@ -12,49 +15,191 @@
 </style>
 </head>
 <body>
+<button onclick="load()">Refresh</button>
+<button onclick="save()">Save</button>
+<div id="table"></div>
 <script>
 var RendererTable = {
   _table: null,
+  _thead: null,
+  _tbody: null,
 
   _create_row: function(parent, id, data) {
     let row = parent.insertRow(-1);
     row.setAttribute("id", id);
     
-    for (const v of data) {
+    for (const [k, v] of Object.entries(data)) {
       let cell = row.insertCell(-1);
+      cell.id = k;
       cell.innerHTML = v;
+    }
+  },
+
+  _create_row2: function(parent, id, data) {
+    let row = parent.insertRow(-1);
+    row.setAttribute("id", id);
+    
+    for (const c of this._thead.rows[0].cells) {
+      let field = c.id;
+      
+      let cell = row.insertCell(-1);
+      cell.id = field;
+      cell.innerHTML = data[field];
     }
   },
 
   _update_row: function(id, data) {
     let row = _table.rows.namedItem(id);
 
-    let i = 1;
-    for (const v of data) {
-      row.cells[i++].innerHTML = v; 
+    for (const [k, v] of Object.entries(data)) {
+      let cell = row.namedItem(k);
+      cell.innerHTML = v;
     }
   },
 
   create: function() {
-    _table = document.createElement("TABLE");
-    _table.setAttribute("id", "rendererTable");
+    table = document.createElement("TABLE");
+    table.setAttribute("id", "rendererTable");
     
-    let thead = _table.createTHead();
-    this._create_row(thead, "head", ["Name", "UUID", "Location", "Status", "Selected"]);
+    thead = table.createTHead();
+    this._create_row(thead, "head", {name: "Name", uuid: "UUID", control_url: "Location", status: "Status", selected: "Selected"});
     
-    let tbody = _table.createTBody();
+    tbody = table.createTBody();
 
-    document.body.appendChild(_table);
+    document.body.appendChild(table);
+
+    this._table = table;
+    this._thead = thead;
+    this._tbody = tbody;
+  },
+
+  update: function(renderers) {
+    for (const [uuid, renderer] of Object.entries(renderers)) {
+      console.log(uuid, renderer);
+
+      let row = this._table.rows.namedItem(uuid);
+      if (row == null)
+        this._create_row2(this._tbody, uuid, renderer);
+      else
+        this._update_row(uuid, renderer);
+
+    }
   },
 }
 
-RendererTable.create();
+String.prototype.format = function () {
+  a = this;
+  for (k in arguments) {
+    a = a.replace("{" + k + "}", arguments[k])
+  }
+  return a
+}
+
+function getJsonXhrRequest() {
+  let promise = new Promise((resolve, reject) => {
+    let xhr = new XMLHttpRequest();
+    xhr.onreadystatechange = () => {
+      if (xhr.readyState == XMLHttpRequest.DONE) {
+        if (xhr.status == 200) {
+          resolve(JSON.parse(xhr.responseText));
+        }
+        else {
+          let message = "Error: {0}".format((xhr.status != 0) ? xhr.responseText : "Timeout");
+          reject(message);
+        }
+      }
+    };
+
+    xhr.open("GET", "http://" + "192.168.1.248" + "/?action=get");
+    xhr.timeout = 5000;
+    xhr.send();
+  });
+
+  return promise;
+}
+
+function sendJsonXhrRequest(json) {
+  if (typeof josn != "string")
+    json = JSON.stringify(json);
+
+  let promise = new Promise((resolve, reject) => {
+    let xhr = new XMLHttpRequest();
+    xhr.onreadystatechange = () => {
+      if (xhr.readyState == XMLHttpRequest.DONE) {
+        if (xhr.status == 200) {
+          resolve();
+        }
+        else {
+          let message = "Error: {0}".format((xhr.status != 0) ? xhr.responseText : "Timeout");
+          reject(message);
+        }
+      }
+    };
+
+    xhr.open("POST", "http://" + "192.168.1.248" + "/?action=set");
+    xhr.timeout = 5000;
+    xhr.setRequestHeader("Content-Type", "application/json");
+    xhr.send(json);
+  });
+
+  return promise;
+}
+
+function from_dictionary(dict) {
+  let arr = [];
+  Object.values(dict).forEach(v => arr.push(v));
+  return arr;
+}
+
+function to_dictionary(array) {
+  let obj = {};
+  array.forEach(c => obj[c.uuid] = c);
+  return obj;
+};
+
+function load() {
+  // Status.set("Loading settings...");
+  getJsonXhrRequest().then((root) => {
+    //RendererTable.update(root.renderers);
+    table.setData(from_dictionary(root.renderers));
+    // Status.set_success("Settings loaded.");
+  }).catch((message) => {
+    // Status.set_error("Load failed.", message);
+  });
+}
+
+function save() {
+  let root = {};
+  root["renderers"] = to_dictionary(table.getData());
+  sendJsonXhrRequest(root);
+}
+
+//RendererTable.create();
+
+// Fetch data from server
+window.onload = () => load();
 
 // // Start status connection
 // let socket = new WebSocket("ws://" + location.host);
 // socket.onmessage = (ev) => {
 //   let status = JSON.parse(ev.data);
 // };
+
+// Define the channel table
+var table = new Tabulator("#table", {
+  reactiveData: true,
+  data: [],
+  
+  columns: [
+    { title: "Name", field: "name"},
+    { title: "UUID", field: "uuid"},
+    { title: "Location", field: "control_url"},
+    { title: "Status", field: "status"},
+    { title: "Selected", field: "selected", formatter: "tickCross", hozAlign: "center",
+      cellClick: (e, c) => { c.setValue(!c.getValue()) }
+    }
+  ],
+});
 </script>
 </body>
 </html>
