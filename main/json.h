@@ -27,6 +27,7 @@ namespace JSON
   }
 
   std::string get_renderers();
+  bool parse_renderers(const std::string& jString);
 }
 
 #endif

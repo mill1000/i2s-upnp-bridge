@@ -173,23 +173,22 @@ static void httpEventHandler(struct mg_connection* nc, int ev, void* ev_data, vo
         mg_send(nc, renderers.c_str(), renderers.length());
         nc->flags |= MG_F_SEND_AND_CLOSE;
     
-    
         break;
       }
       else if (strcmp(action, "set") == 0) // Set JSON values
       {
         // Move JSON data into null terminated buffer
-        // std::string buffer(hm->body.p, hm->body.p + hm->body.len);
+        std::string buffer(hm->body.p, hm->body.p + hm->body.len);
 
-        // ESP_LOGI(TAG, "Set = %s", buffer.c_str());
+        ESP_LOGI(TAG, "Set = %s", buffer.c_str());
 
-        // bool success = JSON::parse_renderers(buffer);
+        bool success = JSON::parse_renderers(buffer);
 
-        // const char* errorString = success ? "Update successful." : "JSON parse failed.";
+        const char* errorString = success ? "Update successful." : "JSON parse failed.";
         
-        // mg_send_head(nc, success ? 200 : 400, strlen(errorString), "Content-Type: text/html");
-        // mg_printf(nc, errorString);
-        // nc->flags |= MG_F_SEND_AND_CLOSE;
+        mg_send_head(nc, success ? 200 : 400, strlen(errorString), "Content-Type: text/html");
+        mg_printf(nc, errorString);
+        nc->flags |= MG_F_SEND_AND_CLOSE;
       }
       else
       {
