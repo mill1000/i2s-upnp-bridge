@@ -13,8 +13,22 @@ namespace UPNP
       std::string control_url;
       bool selected = false;
 
-      Renderer(const std::string& uuid) : uuid(uuid) {}
-      Renderer(const std::string& uuid, const std::string& name) : uuid(uuid), name(name) {}
+      Renderer() {}
+      Renderer(const std::string& uuid, const std::string& name = "", const std::string& url = "") : uuid(uuid), name(name), control_url(url) {}
+
+      bool valid(void)
+      {
+        if (control_url.empty())
+          return false;
+
+        if (control_url.empty())
+          return false;
+
+        if (control_url.empty())
+          return false;
+
+        return true;
+      }
   };
 }
 

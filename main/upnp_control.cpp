@@ -9,6 +9,7 @@
 #include <string>
 #include <map>
 
+#include "ssdp.h"
 #include "upnp_control.h"
 #include "upnp.h"
 #include "upnp_renderer.h"
@@ -21,6 +22,125 @@
 static EventGroupHandle_t upnpEventGroup;
 static UpnpControl::renderer_map_t discoveredRenderers;
 static SemaphoreHandle_t rendererMutex;
+
+/**
+  @brief  Parse the SSDP description XML into a UPNP::Renderer
+  
+  @param  host The hostname or IP of the device
+  @param  desc Description received from the device
+  @retval UPNP::Renderer
+*/
+UPNP::Renderer SSDP::parse_description(const std::string& host, const std::string& desc)
+{
+  // Build the XML document
+  tinyxml2::XMLDocument xml_document;
+  xml_document.Parse(desc.c_str());
+
+  tinyxml2::XMLElement* root = xml_document.FirstChildElement("root");
+  if (root == nullptr)
+  {
+    ESP_LOGE(TAG, "Invalid description XML. No root element.");
+    return UPNP::Renderer();
+  }
+
+  // Start decoding the device element for useful information
+  tinyxml2::XMLElement* device = root->FirstChildElement("device");
+  if (device == nullptr)
+  {
+    ESP_LOGE(TAG, "Invalid description XML. Could not locate device element.");
+    return UPNP::Renderer();
+  }
+
+  // Extract friendly name from device description
+  tinyxml2::XMLElement* friendlyName = device->FirstChildElement("friendlyName");
+  if (friendlyName == nullptr)
+  {
+    ESP_LOGE(TAG, "Invalid description XML. Could not locate friendlyName element.");
+    return UPNP::Renderer();
+  }
+
+  std::string name = std::string(friendlyName->GetText());
+
+  // Extract UDN from device description
+  tinyxml2::XMLElement* UDN = device->FirstChildElement("UDN");
+  if (UDN == nullptr)
+  {
+    ESP_LOGE(TAG, "Invalid description XML. Could not locate UDN element.");
+    return UPNP::Renderer();
+  }
+
+  // Sscanf the UUID since std::regex is stack hungry
+  char uuid_buffer[256] = {0};
+  if (sscanf(UDN->GetText(), "uuid:%255s", uuid_buffer) != 1)
+  {
+    ESP_LOGE(TAG, "Could not extract UUID from UDN: %s", UDN->GetText());
+    return UPNP::Renderer();
+  }
+
+  std::string uuid(uuid_buffer);
+  if (uuid.empty())
+  {
+    ESP_LOGE(TAG, "Invalid UUID for renderer: %s.", uuid.c_str());
+    return UPNP::Renderer();
+  }
+
+  // TODO icons
+
+  // Grab service list to search for AVTransport
+  tinyxml2::XMLElement* serviceList = device->FirstChildElement("serviceList");
+  if (serviceList == nullptr)
+  {
+    ESP_LOGE(TAG, "Invalid description XML. Could not locate serviceList element.");
+    return UPNP::Renderer();
+  }
+
+  // Extract the control URL from the AVTransport service
+  std::string control_url;
+  tinyxml2::XMLElement* service = serviceList->FirstChildElement();
+  while (service != nullptr) // Scan all services in serviceList
+  {
+    tinyxml2::XMLElement* serviceType = service->FirstChildElement("serviceType");
+    if (serviceType == nullptr || std::string(serviceType->GetText()).compare("urn:schemas-upnp-org:service:AVTransport:1") != 0)
+    {
+      // Can't find serviceType element, or not AVTransport service
+      service = service->NextSiblingElement();
+      continue;
+    }
+
+    // Grab control URL from matching service
+    tinyxml2::XMLElement* controlURL = service->FirstChildElement("controlURL");
+    if (controlURL != nullptr)
+    {
+      control_url = std::string(controlURL->GetText());
+      break;
+    }
+    
+    // Fetch next service
+    service = service->NextSiblingElement();
+    continue;
+  }
+
+  if (control_url.empty())
+  {
+    ESP_LOGE(TAG, "Could not find control URL for AVTransport service.");
+    return UPNP::Renderer();
+  }
+  
+  // Grab the base URL if it exists
+  std::string base_url;
+  tinyxml2::XMLElement* urlBase = root->FirstChildElement("URLBase");
+  if (urlBase != nullptr)
+    base_url = std::string(urlBase->GetText());
+
+  // Build the base URL from the remote socket address if it's empty
+  if (base_url.empty())
+    base_url = host;
+
+  // Combine base and control URL
+  control_url = base_url + control_url;
+
+  return UPNP::Renderer(uuid, name, control_url);
+}
 
 /**
   @brief  Convert a mg_str to std::string
@@ -76,133 +196,34 @@ static void ssdpDescriptionEventHandler(struct mg_connection* nc, int ev, void* 
   switch(ev)
   {
     case MG_EV_HTTP_REPLY:
-    {
-      struct http_message* hm = (struct http_message*) ev_data;;
-      
+    {      
+      char addr[32];
+      mg_sock_addr_to_str(&nc->sa, addr, sizeof(addr), MG_SOCK_STRINGIFY_IP | MG_SOCK_STRINGIFY_PORT);
+      std::string host = std::string(addr);
+
+      struct http_message* hm = (struct http_message*) ev_data;
       const std::string description = std::string(hm->body.p, hm->body.len);
-      ESP_LOGD(TAG, "Description Reply: %s", description.c_str());
 
-      tinyxml2::XMLDocument xml_document;
-      xml_document.Parse(description.c_str());
+      ESP_LOGD(TAG, "Description from %s: %s", host.c_str(), description.c_str());
 
-      tinyxml2::XMLElement* root = xml_document.FirstChildElement("root");
-      if (root == nullptr)
-      {
-        ESP_LOGE(TAG, "Invalid description XML. No root element.");
+      // Parse the description response into a renderer object
+      UPNP::Renderer renderer = SSDP::parse_description(host, description);
+
+      // Ignore invalid objects
+      if (!renderer.valid())
         return;
-      }
 
-      // Start decoding the device element for useful information
-      tinyxml2::XMLElement* device = root->FirstChildElement("device");
-      if (device == nullptr)
-      {
-        ESP_LOGE(TAG, "Invalid description XML. Could not locate device element.");
-        return;
-      }
+      ESP_LOGI(TAG, "Found renderer: %s - %s", renderer.name.c_str(), renderer.control_url.c_str());
 
-      // Extract friendly name from device description
-      tinyxml2::XMLElement* friendlyName = device->FirstChildElement("friendlyName");
-      if (friendlyName == nullptr)
-      {
-        ESP_LOGE(TAG, "Invalid description XML. Could not locate friendlyName element.");
-        return;
-      }
-
-      std::string name = std::string(friendlyName->GetText());
-
-      // Extract UDN from device description
-      tinyxml2::XMLElement* UDN = device->FirstChildElement("UDN");
-      if (UDN == nullptr)
-      {
-        ESP_LOGE(TAG, "Invalid description XML. Could not locate UDN element.");
-        return;
-      }
-
-      // Sscanf the UUID since std::regex is stack hungry
-      char uuid_buffer[256] = {0};
-      if (sscanf(UDN->GetText(), "uuid:%255s", uuid_buffer) != 1)
-      {
-        ESP_LOGE(TAG, "Could not extract UUID from UDN: %s", UDN->GetText());
-        return;
-      }
-
-      std::string uuid(uuid_buffer);
-      if (uuid.empty())
-      {
-        ESP_LOGE(TAG, "Invalid UUID for renderer: %s.", uuid.c_str());
-        return;
-      }
-
-      // TODO icons
-
-      // Grab service list to search for AVTransport
-      tinyxml2::XMLElement* serviceList = device->FirstChildElement("serviceList");
-      if (serviceList == nullptr)
-      {
-        ESP_LOGE(TAG, "Invalid description XML. Could not locate serviceList element.");
-        return;
-      }
-
-      // Extract the control URL from the AVTransport service
-      std::string control_url;
-      tinyxml2::XMLElement* service = serviceList->FirstChildElement();
-      while (service != nullptr) // Scan all services in serviceList
-      {
-        tinyxml2::XMLElement* serviceType = service->FirstChildElement("serviceType");
-        if (serviceType == nullptr || std::string(serviceType->GetText()).compare("urn:schemas-upnp-org:service:AVTransport:1") != 0)
-        {
-          // Can't find serviceType element, or not AVTransport service
-          service = service->NextSiblingElement();
-          continue;
-        }
-
-        // Grab control URL from matching service
-        tinyxml2::XMLElement* controlURL = service->FirstChildElement("controlURL");
-        if (controlURL != nullptr)
-        {
-          control_url = std::string(controlURL->GetText());
-          break;
-        }
-        
-        // Fetch next service
-        service = service->NextSiblingElement();
-        continue;
-      }
-
-      if (control_url.empty())
-      {
-        ESP_LOGE(TAG, "Could not find control URL for AVTransport service.");
-        return;
-      }
-      
-      // Grab the base URL if it exists
-      std::string base_url;
-      tinyxml2::XMLElement* urlBase = root->FirstChildElement("URLBase");
-      if (urlBase != nullptr)
-        base_url = std::string(urlBase->GetText());
-
-      // Build the base URL from the remote socket address if it's empty
-      if (base_url.empty())
-      {
-        char addr[32];
-        mg_sock_addr_to_str(&nc->sa, addr, sizeof(addr), MG_SOCK_STRINGIFY_IP | MG_SOCK_STRINGIFY_PORT);
-        base_url = std::string(addr) + mg_str_string(&hm->uri);
-      }
-
-      // Combine base and control URL
-      control_url = base_url + control_url;
-
-      ESP_LOGI(TAG, "Found renderer: %s - %s", name.c_str(), control_url.c_str());
-
-      // Lock the renderer list
+      // Insert renderer into map
       xSemaphoreTake(rendererMutex, portMAX_DELAY);
-
+      
       // Fetch renderer from map and create if needed
-      auto it = discoveredRenderers.emplace(uuid, UPNP::Renderer(uuid)).first;
+      auto it = discoveredRenderers.emplace(renderer.uuid, renderer).first;
       
       // Update name and control URL
-      it->second.name = name;
-      it->second.control_url = control_url;
+      it->second.name = renderer.name;
+      it->second.control_url = renderer.control_url;
 
       xSemaphoreGive(rendererMutex);
 
