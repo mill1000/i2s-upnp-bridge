@@ -14,6 +14,7 @@
 #include "upnp.h"
 #include "upnp_renderer.h"
 #include "mongoose.h"
+#include "nvs_interface.h"
 #include "tinyxml2.h"
 #include "utils.h"
 
@@ -151,35 +152,6 @@ UPNP::Renderer SSDP::parse_description(const std::string& host, const std::strin
 static inline std::string mg_str_string(const mg_str* s)
 {
   return (s == nullptr) ? std::string() : std::string(s->p, s->len);
-}
-
-/**
-  @brief  Generic Mongoose event handler for the HTTP server
-  
-  @param  nc Mongoose connection
-  @param  ev Mongoose event calling the function
-  @param  ev_data Event data pointer
-  @param  user_data User data pointer
-  @retval none
-*/
-static void httpEventHandler(struct mg_connection* nc, int ev, void* ev_data, void* user_data)
-{
-  switch(ev)
-  {
-    case MG_EV_HTTP_REPLY:
-    {
-      struct http_message* hm = (struct http_message*) ev_data;
-      
-      UpnpControl::event_callback_t callback = (UpnpControl::event_callback_t) user_data;
-      if (callback)
-        callback(hm->resp_code, std::string(hm->resp_status_msg.p, hm->resp_status_msg.len));
-    
-      break;
-    }
-
-    default:
-      break;
-  }
 }
 
 /**
@@ -479,22 +451,15 @@ void UpnpControl::task(void* pvParameters)
   ip4_addr_t groupAddr = { .addr = inet_addr("239.255.255.250") };
   igmp_joingroup(&addr, &groupAddr);
 
-  const char* url = "http://192.168.1.104:1150/AVTransport/33aceb4c-6ebd-62eb-2f4c-fd5298f56d43/control.xml";
-  //const char* url = "http://192.168.1.3:49494/upnp/control/rendertransport1";
+  // Ensure renderers are loaded from NVS
+  update_selected_renderers();
+
   // Loop waiting for events
   while(true)
   {
     EventBits_t events = xEventGroupWaitBits(upnpEventGroup, (uint32_t) Event::All, pdTRUE, pdFALSE, 0);
 
-    // Start playback by first setting the URI
-    if (events & (uint32_t) Event::Play)
-      xEventGroupSetBits(upnpEventGroup, (uint32_t) Event::SendSetUriAction);
-
-    // Stop playback by sending the Stop action
-    if (events & (uint32_t) Event::Stop)
-      xEventGroupSetBits(upnpEventGroup, (uint32_t) Event::SendStopAction);
-
-    // Stop playback by sending the Stop action
+    // Update selected renderers from NVS
     if (events & (uint32_t) Event::UpdateSelectedRenderers)
     {
       std::map<std::string, std::string> nvs_renderers = NVS::get_renderers();
@@ -521,55 +486,118 @@ void UpnpControl::task(void* pvParameters)
       xSemaphoreGive(rendererMutex);
     }
 
-    if (events & (uint32_t) Event::SendSetUriAction)
+    // Start playback on selected renderers
+    if (events & (uint32_t) Event::Play)
     {
+      // Build URI for the stream
       tcpip_adapter_ip_info_t info;
       tcpip_adapter_get_ip_info(TCPIP_ADAPTER_IF_STA, &info);
 
       std::string uri = "http://" + std::string(ip4addr_ntoa(&info.ip)) + "/stream.wav";
-      ESP_LOGI(TAG, "SetAvTransportUri = '%s'", uri.c_str());
 
-      // Create the set URI action
-      UPNP::SetAvTransportUriAction setUri(uri);
-
-      event_callback_t callback = [](int code, const std::string& result)
+      // Mongoose handler to chain a Play action on success
+      auto event_handler = [](struct mg_connection* nc, int ev, void* ev_data, void* user_data)
       {
-        // Follow will a Play action if successful
-        if (code == 200)
-          xEventGroupSetBits(upnpEventGroup, (uint32_t) Event::SendPlayAction);
-        else
-          ESP_LOGE(TAG, "Failed SetAvTransportUri action. Code: %d Response: %s.", code, result.c_str());
+        if (ev != MG_EV_HTTP_REPLY)
+          return;
+      
+        struct http_message* hm = (struct http_message*) ev_data;
+          
+        // Throw error on bad response
+        if (hm->resp_code != 200)
+        {
+          ESP_LOGE(TAG, "Failed SetAvTransportUri action. Code: %d Response: %s.", hm->resp_code, mg_str_string(&hm->resp_status_msg).c_str());
+          return;
+        }
+
+        // Mongoose handler for play action
+        auto play_event_handler = [](struct mg_connection* nc, int ev, void* ev_data, void* user_data)
+        {
+          if (ev != MG_EV_HTTP_REPLY)
+            return;
+          
+          struct http_message* hm = (struct http_message*) ev_data;
+          
+          if (hm->resp_code != 200)
+            ESP_LOGE(TAG, "Failed Play action. Code: %d Response: %s.", hm->resp_code, mg_str_string(&hm->resp_status_msg).c_str());
+        };
+
+        // Extact the renderer control url from the user_data pointer
+        const std::string* url = (const std::string*) user_data;
+        
+        // Send play action to renderer
+        UPNP::PlayAction play;
+        mg_connect_http(nc->mgr, play_event_handler, nullptr, url->c_str(), play.headers().c_str(), play.body().c_str());
+
+        // Free the control url
+        // TODO we could leak memory if we never get a reply
+        // Maybe free this on CLOSE instead
+        delete url;
       };
 
-      mg_connect_http(&manager, httpEventHandler, (void*)callback, url, setUri.headers().c_str(), setUri.body().c_str());
+      for (auto& kv : discoveredRenderers)
+      {
+        UPNP::Renderer& r = kv.second;
+        
+        // Ignore non-selected renderers
+        if (r.selected == false)
+          continue;
+        
+        // Send command if we have a valid control URL
+        if (r.control_url.empty())
+        {
+          ESP_LOGW(TAG, "No control URL for selected renderer '%s'.", r.name.c_str());
+          continue;
+        }
+
+        // Allocate a string on the heap to pass as user_data
+        std::string* url = new std::string(r.control_url);
+
+        // Construct and send the set URI action
+        UPNP::SetAvTransportUriAction setUri(uri);
+        mg_connect_http(&manager, event_handler, url, r.control_url.c_str(), setUri.headers().c_str(), setUri.body().c_str());
+      }
+
+      xSemaphoreGive(rendererMutex);
     }
 
-    if (events & (uint32_t) Event::SendPlayAction)
+    // Stop playback on selected renderers
+    if (events & (uint32_t) Event::Stop)
     {
-      // Start playback
-      UPNP::PlayAction play;
-
-      event_callback_t callback = [](int code, const std::string& result)
+      // Mongoose handler. Yay lambdas
+      auto event_handler = [](struct mg_connection* nc, int ev, void* ev_data, void* user_data)
       {
-        if (code != 200)
-          ESP_LOGE(TAG, "Failed Play action. Code: %d Response: %s.", code, result.c_str());
+        if (ev != MG_EV_HTTP_REPLY)
+          return;
+        
+        struct http_message* hm = (struct http_message*) ev_data;
+        
+        if (hm->resp_code != 200)
+          ESP_LOGE(TAG, "Failed Stop action. Code: %d Response: %s.", hm->resp_code, mg_str_string(&hm->resp_status_msg).c_str());
       };
 
-      mg_connect_http(&manager, httpEventHandler, (void*)callback, url, play.headers().c_str(), play.body().c_str());
-    }
+      xSemaphoreTake(rendererMutex, portMAX_DELAY);
 
-    if (events & (uint32_t) Event::SendStopAction)
-    {
-      // Stop playback
-      UPNP::StopAction stop;
-
-      event_callback_t callback = [](int code, const std::string& result)
+      for (auto& kv : discoveredRenderers)
       {
-        if (code != 200)
-          ESP_LOGE(TAG, "Failed Stop action. Code: %d Response: %s.", code, result.c_str());
-      };
+        UPNP::Renderer& r = kv.second;
+   
+        // Ignore non-selected renderers
+        if (r.selected == false)
+          continue;
 
-      mg_connect_http(&manager, httpEventHandler, (void*)callback, url, stop.headers().c_str(), stop.body().c_str());
+        if (r.control_url.empty())
+        {
+          ESP_LOGW(TAG, "No control URL for selected renderer '%s'.", r.name.c_str());
+          continue;
+        }
+
+        // Send stop action to renderer
+        UPNP::StopAction stop;
+        mg_connect_http(&manager, event_handler, nullptr, r.control_url.c_str(), stop.headers().c_str(), stop.body().c_str());
+      }
+
+      xSemaphoreGive(rendererMutex);
     }
 
     mg_mgr_poll(&manager, 1000);
