@@ -387,7 +387,7 @@ static void ssdpDiscoveryEventHandler(struct mg_connection* nc, int ev, void* ev
       }
 
       // Restart timer to search again
-      mg_set_timer(nc, mg_time() + 60);
+      mg_set_timer(nc, mg_time() + 360);
 
       ESP_LOGI(TAG, "Sending M-SEARCH.");
 
