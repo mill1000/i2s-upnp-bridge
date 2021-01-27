@@ -137,8 +137,16 @@ UPNP::Renderer SSDP::parse_description(const std::string& host, const std::strin
   if (base_url.empty())
     base_url = host;
 
-  // Combine base and control URL
-  control_url = base_url + control_url;
+  // From trailing slash
+  if (base_url.back() == '/')
+    base_url.pop_back();
+
+  // Remove leading slash
+  if (control_url.front() == '/')
+    control_url.erase(control_url.begin());
+
+  // Combine base and control URL with slash
+  control_url = base_url + "/" + control_url;
 
   return UPNP::Renderer(uuid, name, control_url);
 }
