@@ -193,7 +193,7 @@ static void ssdpDescriptionEventHandler(struct mg_connection* nc, int ev, void* 
       if (!renderer.valid())
         return;
 
-      ESP_LOGI(TAG, "Found renderer: %s - %s", renderer.name.c_str(), renderer.control_url.c_str());
+      ESP_LOGD(TAG, "Found renderer: %s - %s", renderer.name.c_str(), renderer.control_url.c_str());
 
       // Insert renderer into map
       xSemaphoreTake(rendererMutex, portMAX_DELAY);
