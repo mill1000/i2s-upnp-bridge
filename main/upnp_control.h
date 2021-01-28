@@ -8,14 +8,13 @@
 
 namespace UpnpControl
 {
+  constexpr int EVENT_QUEUE_LENGTH = 5;
+
   enum class Event
   {
-    // Events to control the task loop
-    Play = 1 << 0,
-    Stop = 1 << 1,
-    UpdateSelectedRenderers = 1 << 2,
-
-    All = 0x00FFFFFF,
+    Play,
+    Stop,
+    UpdateSelectedRenderers,
   };
 
   void task(void* pvParameters);

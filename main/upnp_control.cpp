@@ -1,6 +1,6 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "freertos/event_groups.h"
+#include "freertos/queue.h"
 #include "esp_err.h"
 #include "esp_log.h"
 #include "tcpip_adapter.h"
@@ -20,7 +20,7 @@
 
 #define TAG "UPNP"
 
-static EventGroupHandle_t upnpEventGroup;
+static QueueHandle_t upnpEventQueue;
 static UpnpControl::renderer_map_t discoveredRenderers;
 static SemaphoreHandle_t rendererMutex;
 
@@ -434,9 +434,9 @@ static void ssdpDiscoveryEventHandler(struct mg_connection* nc, int ev, void* ev
 void UpnpControl::task(void* pvParameters)
 {
   // Create an event group to run the main loop from
-  upnpEventGroup = xEventGroupCreate();
-  if (upnpEventGroup == NULL)
-    ESP_LOGE(TAG, "Failed to create event group.");
+  upnpEventQueue = xQueueCreate(UpnpControl::EVENT_QUEUE_LENGTH, sizeof(UpnpControl::Event));
+  if (upnpEventQueue == NULL)
+    ESP_LOGE(TAG, "Failed to create event queue.");
 
   // Create a mutex to lock renderer list access
   rendererMutex = xSemaphoreCreateMutex();
@@ -465,61 +465,127 @@ void UpnpControl::task(void* pvParameters)
   // Loop waiting for events
   while(true)
   {
-    EventBits_t events = xEventGroupWaitBits(upnpEventGroup, (uint32_t) Event::All, pdTRUE, pdFALSE, 0);
+    mg_mgr_poll(&manager, 1000);
 
-    // Update selected renderers from NVS
-    if (events & (uint32_t) Event::UpdateSelectedRenderers)
+    UpnpControl::Event event;
+    if (xQueueReceive(upnpEventQueue, &event, 0) != pdTRUE)
+      continue;
+
+    switch (event)
     {
-      std::map<std::string, std::string> nvs_renderers = NVS::get_renderers();
-
-      // Lock the renderer list
-      xSemaphoreTake(rendererMutex, portMAX_DELAY);
-
-      // Deselect all known renderers
-      for (auto& kv : discoveredRenderers)
-        kv.second.selected = false;
-
-      // Select all renderers saved in NVS
-      for (const auto& kv : nvs_renderers)
+      case Event::UpdateSelectedRenderers:
       {
-        const std::string& uuid = kv.first;
-        const std::string& name = kv.second;
+        // Update selected renderers
+        std::map<std::string, std::string> nvs_renderers = NVS::get_renderers();
 
-        auto it = discoveredRenderers.emplace(uuid, UPNP::Renderer(uuid, name)).first;
-        it->second.selected = true;
+        // Lock the renderer list
+        xSemaphoreTake(rendererMutex, portMAX_DELAY);
 
-        ESP_LOGI(TAG, "Renderer '%s' selected for playback.", it->second.name.c_str());
-      }
+        // Deselect all known renderers
+        for (auto& kv : discoveredRenderers)
+          kv.second.selected = false;
 
-      xSemaphoreGive(rendererMutex);
-    }
-
-    // Start playback on selected renderers
-    if (events & (uint32_t) Event::Play)
-    {
-      // Build URI for the stream
-      tcpip_adapter_ip_info_t info;
-      tcpip_adapter_get_ip_info(TCPIP_ADAPTER_IF_STA, &info);
-
-      std::string uri = "http://" + std::string(ip4addr_ntoa(&info.ip)) + "/stream.wav";
-
-      // Mongoose handler to chain a Play action on success
-      auto event_handler = [](struct mg_connection* nc, int ev, void* ev_data, void* user_data)
-      {
-        if (ev != MG_EV_HTTP_REPLY)
-          return;
-      
-        struct http_message* hm = (struct http_message*) ev_data;
-          
-        // Throw error on bad response
-        if (hm->resp_code != 200)
+        // Select all renderers saved in NVS
+        for (const auto& kv : nvs_renderers)
         {
-          ESP_LOGE(TAG, "Failed SetAvTransportUri action. Code: %d Response: %s.", hm->resp_code, mg_str_string(&hm->resp_status_msg).c_str());
-          return;
+          const std::string& uuid = kv.first;
+          const std::string& name = kv.second;
+
+          auto it = discoveredRenderers.emplace(uuid, UPNP::Renderer(uuid, name)).first;
+          it->second.selected = true;
+
+          ESP_LOGI(TAG, "Renderer '%s' selected for playback.", it->second.name.c_str());
         }
 
-        // Mongoose handler for play action
-        auto play_event_handler = [](struct mg_connection* nc, int ev, void* ev_data, void* user_data)
+        xSemaphoreGive(rendererMutex);
+        break;
+      }
+
+      case Event::Play:
+      {
+        // Start playback on selected renderers
+
+        // Build URI for the stream
+        tcpip_adapter_ip_info_t info;
+        tcpip_adapter_get_ip_info(TCPIP_ADAPTER_IF_STA, &info);
+
+        std::string uri = "http://" + std::string(ip4addr_ntoa(&info.ip)) + "/stream.wav";
+
+        // Mongoose handler to chain a Play action on success
+        auto event_handler = [](struct mg_connection* nc, int ev, void* ev_data, void* user_data)
+        {
+          if (ev != MG_EV_HTTP_REPLY)
+            return;
+        
+          struct http_message* hm = (struct http_message*) ev_data;
+            
+          // Throw error on bad response
+          if (hm->resp_code != 200)
+          {
+            ESP_LOGE(TAG, "Failed SetAvTransportUri action. Code: %d Response: %s.", hm->resp_code, mg_str_string(&hm->resp_status_msg).c_str());
+            return;
+          }
+
+          // Mongoose handler for play action
+          auto play_event_handler = [](struct mg_connection* nc, int ev, void* ev_data, void* user_data)
+          {
+            if (ev != MG_EV_HTTP_REPLY)
+              return;
+            
+            struct http_message* hm = (struct http_message*) ev_data;
+            
+            if (hm->resp_code != 200)
+              ESP_LOGE(TAG, "Failed Play action. Code: %d Response: %s.", hm->resp_code, mg_str_string(&hm->resp_status_msg).c_str());
+          };
+
+          // Extact the renderer control url from the user_data pointer
+          const std::string* url = (const std::string*) user_data;
+          
+          // Send play action to renderer
+          UPNP::PlayAction play;
+          mg_connect_http(nc->mgr, play_event_handler, nullptr, url->c_str(), play.headers().c_str(), play.body().c_str());
+
+          // Free the control url
+          // TODO we could leak memory if we never get a reply
+          // Maybe free this on CLOSE instead
+          delete url;
+        };
+
+        xSemaphoreTake(rendererMutex, portMAX_DELAY);
+
+        for (auto& kv : discoveredRenderers)
+        {
+          UPNP::Renderer& r = kv.second;
+          
+          // Ignore non-selected renderers
+          if (r.selected == false)
+            continue;
+          
+          // Send command if we have a valid control URL
+          if (r.control_url.empty())
+          {
+            ESP_LOGW(TAG, "No control URL for selected renderer '%s'.", r.name.c_str());
+            continue;
+          }
+
+          // Allocate a string on the heap to pass as user_data
+          std::string* url = new std::string(r.control_url);
+
+          // Construct and send the set URI action
+          UPNP::SetAvTransportUriAction setUri(uri);
+          mg_connect_http(&manager, event_handler, url, r.control_url.c_str(), setUri.headers().c_str(), setUri.body().c_str());
+        }
+
+        xSemaphoreGive(rendererMutex);
+        break;
+      }
+
+      case Event::Stop:
+      {
+        // Stop playback on selected renderers
+        
+        // Mongoose handler. Yay lambdas
+        auto event_handler = [](struct mg_connection* nc, int ev, void* ev_data, void* user_data)
         {
           if (ev != MG_EV_HTTP_REPLY)
             return;
@@ -527,90 +593,37 @@ void UpnpControl::task(void* pvParameters)
           struct http_message* hm = (struct http_message*) ev_data;
           
           if (hm->resp_code != 200)
-            ESP_LOGE(TAG, "Failed Play action. Code: %d Response: %s.", hm->resp_code, mg_str_string(&hm->resp_status_msg).c_str());
+            ESP_LOGE(TAG, "Failed Stop action. Code: %d Response: %s.", hm->resp_code, mg_str_string(&hm->resp_status_msg).c_str());
         };
 
-        // Extact the renderer control url from the user_data pointer
-        const std::string* url = (const std::string*) user_data;
-        
-        // Send play action to renderer
-        UPNP::PlayAction play;
-        mg_connect_http(nc->mgr, play_event_handler, nullptr, url->c_str(), play.headers().c_str(), play.body().c_str());
+        xSemaphoreTake(rendererMutex, portMAX_DELAY);
 
-        // Free the control url
-        // TODO we could leak memory if we never get a reply
-        // Maybe free this on CLOSE instead
-        delete url;
-      };
-      
-      xSemaphoreTake(rendererMutex, portMAX_DELAY);
-
-      for (auto& kv : discoveredRenderers)
-      {
-        UPNP::Renderer& r = kv.second;
-        
-        // Ignore non-selected renderers
-        if (r.selected == false)
-          continue;
-        
-        // Send command if we have a valid control URL
-        if (r.control_url.empty())
+        for (auto& kv : discoveredRenderers)
         {
-          ESP_LOGW(TAG, "No control URL for selected renderer '%s'.", r.name.c_str());
-          continue;
+          UPNP::Renderer& r = kv.second;
+    
+          // Ignore non-selected renderers
+          if (r.selected == false)
+            continue;
+
+          if (r.control_url.empty())
+          {
+            ESP_LOGW(TAG, "No control URL for selected renderer '%s'.", r.name.c_str());
+            continue;
+          }
+
+          // Send stop action to renderer
+          UPNP::StopAction stop;
+          mg_connect_http(&manager, event_handler, nullptr, r.control_url.c_str(), stop.headers().c_str(), stop.body().c_str());
         }
 
-        // Allocate a string on the heap to pass as user_data
-        std::string* url = new std::string(r.control_url);
-
-        // Construct and send the set URI action
-        UPNP::SetAvTransportUriAction setUri(uri);
-        mg_connect_http(&manager, event_handler, url, r.control_url.c_str(), setUri.headers().c_str(), setUri.body().c_str());
+        xSemaphoreGive(rendererMutex);
+        break;
       }
 
-      xSemaphoreGive(rendererMutex);
+      default:
+        break;
     }
-
-    // Stop playback on selected renderers
-    if (events & (uint32_t) Event::Stop)
-    {
-      // Mongoose handler. Yay lambdas
-      auto event_handler = [](struct mg_connection* nc, int ev, void* ev_data, void* user_data)
-      {
-        if (ev != MG_EV_HTTP_REPLY)
-          return;
-        
-        struct http_message* hm = (struct http_message*) ev_data;
-        
-        if (hm->resp_code != 200)
-          ESP_LOGE(TAG, "Failed Stop action. Code: %d Response: %s.", hm->resp_code, mg_str_string(&hm->resp_status_msg).c_str());
-      };
-
-      xSemaphoreTake(rendererMutex, portMAX_DELAY);
-
-      for (auto& kv : discoveredRenderers)
-      {
-        UPNP::Renderer& r = kv.second;
-   
-        // Ignore non-selected renderers
-        if (r.selected == false)
-          continue;
-
-        if (r.control_url.empty())
-        {
-          ESP_LOGW(TAG, "No control URL for selected renderer '%s'.", r.name.c_str());
-          continue;
-        }
-
-        // Send stop action to renderer
-        UPNP::StopAction stop;
-        mg_connect_http(&manager, event_handler, nullptr, r.control_url.c_str(), stop.headers().c_str(), stop.body().c_str());
-      }
-
-      xSemaphoreGive(rendererMutex);
-    }
-
-    mg_mgr_poll(&manager, 1000);
   }
 
   // Free the manager if we ever exit
@@ -627,8 +640,9 @@ void UpnpControl::task(void* pvParameters)
 */
 void UpnpControl::play()
 {
-  if (upnpEventGroup != NULL)
-    xEventGroupSetBits(upnpEventGroup, (uint32_t) Event::Play);
+  Event event = Event::Play;
+  if (upnpEventQueue != NULL)
+    xQueueSendToBack(upnpEventQueue, &event, pdMS_TO_TICKS(10));
 }
 
 /**
@@ -639,8 +653,9 @@ void UpnpControl::play()
 */
 void UpnpControl::stop()
 {
-  if (upnpEventGroup != NULL)
-    xEventGroupSetBits(upnpEventGroup, (uint32_t) Event::Stop);
+  Event event = Event::UpdateSystemState;
+  if (upnpEventQueue != NULL)
+    xQueueSendToBack(upnpEventQueue, &event, pdMS_TO_TICKS(10));
 }
 
 /**
@@ -651,8 +666,9 @@ void UpnpControl::stop()
 */
 void UpnpControl::update_selected_renderers()
 {
-  if (upnpEventGroup != NULL)
-    xEventGroupSetBits(upnpEventGroup, (uint32_t) Event::UpdateSelectedRenderers);
+  Event event = Event::UpdateSelectedRenderers;
+  if (upnpEventQueue != NULL)
+    xQueueSendToBack(upnpEventQueue, &event, pdMS_TO_TICKS(10));
 }
 
 /**
