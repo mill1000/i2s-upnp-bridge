@@ -542,6 +542,8 @@ void UpnpControl::task(void* pvParameters)
         // Maybe free this on CLOSE instead
         delete url;
       };
+      
+      xSemaphoreTake(rendererMutex, portMAX_DELAY);
 
       for (auto& kv : discoveredRenderers)
       {
