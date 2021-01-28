@@ -229,9 +229,10 @@ static void ssdpDiscoveryEventHandler(struct mg_connection* nc, int ev, void* ev
   constexpr uint32_t MG_F_SSDP_SEARCH = MG_F_USER_1;
   constexpr int32_t SSDP_MX = 5;
 
-  //ST: upnp:rootdevice
-  //ST: urn:schemas-upnp-org:device:MediaRenderer:1
+  // Search target we are looking for
   const char* searchTarget = "urn:schemas-upnp-org:device:MediaRenderer:1";
+
+  // SSDP search request to send
   const char* ssdpSearchRequest =\
   "M-SEARCH * HTTP/1.1\r\n"\
   "HOST: 239.255.255.250:1900\r\n"\
@@ -433,6 +434,9 @@ static void ssdpDiscoveryEventHandler(struct mg_connection* nc, int ev, void* ev
 */
 void UpnpControl::task(void* pvParameters)
 {
+  // Flag to indicate if control is enabled
+  bool enabled = false;
+  
   // Create an event group to run the main loop from
   upnpEventQueue = xQueueCreate(UpnpControl::EVENT_QUEUE_LENGTH, sizeof(UpnpControl::Event));
   if (upnpEventQueue == NULL)
@@ -473,6 +477,16 @@ void UpnpControl::task(void* pvParameters)
 
     switch (event)
     {
+      case Event::Enable:
+        enabled = true;
+        ESP_LOGI(TAG, "Control enabled.");
+        break;
+
+      case Event::Disable:
+        enabled = false; 
+        ESP_LOGI(TAG, "Control disabled.");
+        break;
+
       case Event::UpdateSelectedRenderers:
       {
         // Update selected renderers
@@ -494,15 +508,18 @@ void UpnpControl::task(void* pvParameters)
           auto it = discoveredRenderers.emplace(uuid, UPNP::Renderer(uuid, name)).first;
           it->second.selected = true;
 
-          ESP_LOGI(TAG, "Renderer '%s' selected for playback.", it->second.name.c_str());
+          ESP_LOGI(TAG, "Selected '%s' for playback.", it->second.name.c_str());
         }
 
         xSemaphoreGive(rendererMutex);
         break;
       }
 
-      case Event::Play:
+      case Event::SendPlayAction:
       {
+        if (!enabled)
+          break;
+
         // Start playback on selected renderers
 
         // Build URI for the stream
@@ -553,9 +570,9 @@ void UpnpControl::task(void* pvParameters)
 
         xSemaphoreTake(rendererMutex, portMAX_DELAY);
 
-        for (auto& kv : discoveredRenderers)
+        for (const auto& kv : discoveredRenderers)
         {
-          UPNP::Renderer& r = kv.second;
+          const UPNP::Renderer& r = kv.second;
           
           // Ignore non-selected renderers
           if (r.selected == false)
@@ -564,9 +581,11 @@ void UpnpControl::task(void* pvParameters)
           // Send command if we have a valid control URL
           if (r.control_url.empty())
           {
-            ESP_LOGW(TAG, "No control URL for selected renderer '%s'.", r.name.c_str());
+            ESP_LOGW(TAG, "No control URL for '%s'.", r.name.c_str());
             continue;
           }
+
+          ESP_LOGI(TAG, "Starting playback on '%s'.", r.name.c_str());
 
           // Allocate a string on the heap to pass as user_data
           std::string* url = new std::string(r.control_url);
@@ -580,8 +599,11 @@ void UpnpControl::task(void* pvParameters)
         break;
       }
 
-      case Event::Stop:
+      case Event::SendStopAction:
       {
+        if (!enabled)
+          break;
+
         // Stop playback on selected renderers
         
         // Mongoose handler. Yay lambdas
@@ -598,9 +620,9 @@ void UpnpControl::task(void* pvParameters)
 
         xSemaphoreTake(rendererMutex, portMAX_DELAY);
 
-        for (auto& kv : discoveredRenderers)
+        for (const auto& kv : discoveredRenderers)
         {
-          UPNP::Renderer& r = kv.second;
+          const UPNP::Renderer& r = kv.second;
     
           // Ignore non-selected renderers
           if (r.selected == false)
@@ -608,9 +630,11 @@ void UpnpControl::task(void* pvParameters)
 
           if (r.control_url.empty())
           {
-            ESP_LOGW(TAG, "No control URL for selected renderer '%s'.", r.name.c_str());
+            ESP_LOGW(TAG, "No control URL for '%s'.", r.name.c_str());
             continue;
           }
+
+          ESP_LOGI(TAG, "Stopping playback on '%s'.", r.name.c_str());
 
           // Send stop action to renderer
           UPNP::StopAction stop;
@@ -633,16 +657,27 @@ void UpnpControl::task(void* pvParameters)
 }
 
 /**
+  @brief  Queue an event on the UpnpControl queue
+  
+  @param  event Event to queue
+  @retval none
+*/
+static void queue_event(UpnpControl::Event event)
+{
+  if (upnpEventQueue != NULL)
+    xQueueSendToBack(upnpEventQueue, &event, pdMS_TO_TICKS(10));
+}
+
+/**
   @brief  Send a play command to the renderer
   
   @param  none
   @retval none
 */
-void UpnpControl::play()
+void UpnpControl::enable()
 {
-  Event event = Event::Play;
-  if (upnpEventQueue != NULL)
-    xQueueSendToBack(upnpEventQueue, &event, pdMS_TO_TICKS(10));
+  queue_event(Event::Enable);
+  queue_event(Event::SendPlayAction);
 }
 
 /**
@@ -651,11 +686,10 @@ void UpnpControl::play()
   @param  none
   @retval none
 */
-void UpnpControl::stop()
+void UpnpControl::disable()
 {
-  Event event = Event::UpdateSystemState;
-  if (upnpEventQueue != NULL)
-    xQueueSendToBack(upnpEventQueue, &event, pdMS_TO_TICKS(10));
+  queue_event(Event::SendStopAction);
+  queue_event(Event::Disable);
 }
 
 /**
@@ -666,9 +700,14 @@ void UpnpControl::stop()
 */
 void UpnpControl::update_selected_renderers()
 {
-  Event event = Event::UpdateSelectedRenderers;
-  if (upnpEventQueue != NULL)
-    xQueueSendToBack(upnpEventQueue, &event, pdMS_TO_TICKS(10));
+  // Stop existing renderers
+  queue_event(Event::SendStopAction);
+
+  // Update renderers
+  queue_event(Event::UpdateSelectedRenderers);
+
+  // Resume playback on new renderers
+  queue_event(Event::SendPlayAction);
 }
 
 /**
