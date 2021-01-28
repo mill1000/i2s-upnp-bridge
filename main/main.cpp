@@ -21,8 +21,10 @@
 */
 void System::task(void* pvParameters)
 {
-  // Construct timer to periodically check state
-  TimerHandle_t stateTimer = xTimerCreate("stateTimer", pdMS_TO_TICKS(250), pdFALSE, nullptr, [](TimerHandle_t xTimer ){});
+  // Construct timer to trigger state checks
+  TimerHandle_t stateTimer = xTimerCreate("stateTimer", pdMS_TO_TICKS(250), pdTRUE, xTaskGetCurrentTaskHandle(), [](TimerHandle_t timer){
+    xTaskNotifyGive(pvTimerGetTimerID(timer));
+  });
   xTimerStart(stateTimer, portMAX_DELAY);
 
   int32_t timeout = 0;
@@ -38,12 +40,9 @@ void System::task(void* pvParameters)
     // Queue samples to each client
     HTTP::queue_samples(samples);
 
-    // Update system state when timer expires
-    if (xTimerIsTimerActive(stateTimer) == pdTRUE)
+    // Update system state when notified
+    if (ulTaskNotifyTake(pdTRUE, 0) == 0)
       continue;
-    
-    // Restart timer
-    xTimerStart(stateTimer, pdMS_TO_TICKS(10));
 
     // Test sample buffer and update timeouts
     if (samples.front() == 0 && samples.back() == 0)
