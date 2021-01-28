@@ -135,7 +135,7 @@ UPNP::Renderer SSDP::parse_description(const std::string& host, const std::strin
 
   // Build the base URL from the remote socket address if it's empty
   if (base_url.empty())
-    base_url = host;
+    base_url = "http://" + host;
 
   // From trailing slash
   if (base_url.back() == '/')
