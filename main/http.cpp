@@ -40,7 +40,7 @@ static void httpStreamEventHandler(struct mg_connection* nc, int ev, void* ev_da
 
       if (clients.count(nc))
       {
-        ESP_LOGW(TAG, "Client %s already exists.", addr);
+        ESP_LOGW(TAG, "Client %p (%s) already exists.", nc, addr);
         xSemaphoreGive(clientMutex);
         return;
       }
@@ -49,7 +49,7 @@ static void httpStreamEventHandler(struct mg_connection* nc, int ev, void* ev_da
       QueueHandle_t queue = xQueueCreate(HTTP::CLIENT_QUEUE_LENGTH, sizeof(I2S::sample_buffer_t));
       if (queue == nullptr)
       {
-        ESP_LOGE(TAG, "Failed to create queue for client %s.", addr);
+        ESP_LOGE(TAG, "Failed to create queue for client %p (%s).", nc, addr);
         xSemaphoreGive(clientMutex);
         return;
       }
@@ -62,7 +62,7 @@ static void httpStreamEventHandler(struct mg_connection* nc, int ev, void* ev_da
       HTTP::StreamConfig* streamConfig = (HTTP::StreamConfig*) user_data;
       assert(streamConfig != nullptr);
 
-      ESP_LOGI(TAG, "New %s client %s -> %p.", streamConfig->name, addr, nc);
+      ESP_LOGI(TAG, "New %s client %p (%s).", streamConfig->name, nc, addr);
 
       // Send the HTTP header
       mg_send_response_line(nc, 200, streamConfig->headers);
@@ -110,13 +110,13 @@ static void httpStreamEventHandler(struct mg_connection* nc, int ev, void* ev_da
     {
       char addr[32];
       mg_sock_addr_to_str(&nc->sa, addr, sizeof(addr), MG_SOCK_STRINGIFY_IP | MG_SOCK_STRINGIFY_PORT);
-      ESP_LOGI(TAG, "Client %s disconnected", addr);
+      ESP_LOGI(TAG, "Client %p (%s) disconnected.", nc, addr);
 
       // Delete the clients queue
       if (nc->user_data != nullptr)
         vQueueDelete((QueueHandle_t) nc->user_data);
       else
-        ESP_LOGE(TAG, "No queue for client %s.", addr);
+        ESP_LOGE(TAG, "No queue for client %p (%s).", nc, addr);
 
       // Remove the client
       xSemaphoreTake(clientMutex, portMAX_DELAY);
