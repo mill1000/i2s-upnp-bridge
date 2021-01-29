@@ -292,7 +292,7 @@ void HTTP::queue_samples(const I2S::sample_buffer_t& samples)
 
     // Free up space in the queue
     I2S::sample_buffer_t dummy;
-    if (xQueueReceive(queue, dummy.data(), pdMS_TO_TICKS(50)) != pdTRUE)
+    if (xQueueReceive(queue, dummy.data(), 0) != pdTRUE)
       ESP_LOGE(TAG, "Failed to pop from full queue.");
 
     // Queue without blocking this time
