@@ -1,5 +1,5 @@
-# I2S UPNP Bridge
-Snoop an I2S bus and stream the audio to UPNP renderers with an ESP32. Audio samples are available as raw PCM and WAV streams via HTTP. Playback on selected UPNP renderers is automatically started when activity is detected.
+# I2S UPnP Bridge
+Snoop an I2S bus and stream the audio to UPnP renderers with an ESP32. Audio samples are available as raw PCM and WAV streams via HTTP. Playback on selected UPnP renderers is automatically started when activity is detected.
 
 ![Diagram](images/diagram.png)
 
