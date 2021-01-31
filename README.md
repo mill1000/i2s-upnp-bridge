@@ -50,3 +50,9 @@ The Echo Dot uses a large amount of DSP to improve the internal speaker sound. I
 
 For this application we need the DSP disabled. The solution is to insert a headphone plug or other substitute into the jack to actuate the internal switches. I used a Q-tip with a small amount of heatshrink to get a snug fit.
 ![Dummy Headphone Plug](images/dummy_plug.jpg)
+
+### Physical Assembly
+As I had no use for the internal speaker I gutted it's cavity and installed an ESP32 Dev Kit C into the space. After cutting down the pins the entire design fits back in the original enclosure for a nice clean solution. Additionally I left the ribbon cable to the LED/microphone board disconnected.
+![Pins](images/speaker_cutaway.jpg)
+![Pins](images/speaker_closed.jpg)
+![Pins](images/final_assembly.jpg)
