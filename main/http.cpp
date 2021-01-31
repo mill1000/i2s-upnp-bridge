@@ -3,12 +3,14 @@
 #include "esp_err.h"
 #include "esp_log.h"
 
+#include <queue>
 #include <unordered_set>
 
 #include "http.h"
 #include "i2s_interface.h"
 #include "json.h"
 #include "mongoose.h"
+#include "ota_interface.h"
 #include "utils.h"
 #include "wav.h"
 
@@ -204,6 +206,183 @@ static void httpEventHandler(struct mg_connection* nc, int ev, void* ev_data, vo
 }
 
 /**
+  @brief  Mongoose event handler for the OTA firmware update
+  
+  @param  nc Mongoose connection
+  @param  ev Mongoose event calling the function
+  @param  ev_data Event data pointer
+  @param  user_data User data pointer
+  @retval none
+*/
+static void otaEventHandler(struct mg_connection* nc, int ev, void* ev_data, void* user_data)
+{
+  extern const uint8_t ota_html[] asm("_binary_ota_html_start");
+  extern const uint8_t ota_html_end[] asm("_binary_ota_html_end");
+  const uint32_t ota_html_len = ota_html_end - ota_html;
+
+  constexpr uint32_t MG_F_OTA_FAILED = MG_F_USER_1;
+  constexpr uint32_t MG_F_OTA_COMPLETE = MG_F_USER_2;
+
+  static std::queue<OTA::end_callback_t> callbacks;
+  static std::string response;
+
+  switch(ev)
+  {
+    case MG_EV_HTTP_REQUEST:
+    {
+      // Send the header
+      mg_send_head(nc, 200, ota_html_len, "Content-Type: text/html");
+
+      // Serve the page
+      mg_send(nc, ota_html, ota_html_len);
+      nc->flags |= MG_F_SEND_AND_CLOSE;
+      break;
+    }
+
+    case MG_EV_HTTP_MULTIPART_REQUEST:
+    {
+      // Reset response string
+      response.clear();
+      break;
+    }
+
+    case MG_EV_HTTP_PART_BEGIN:
+    {
+      struct mg_http_multipart_part* multipart = (struct mg_http_multipart_part*) ev_data;
+
+      if (multipart->user_data != nullptr)
+      {
+        ESP_LOGE(TAG, "Non-null OTA handle. OTA already in progress?");
+
+        // Mark OTA as failed and append reason
+        response += "OTA update already in progress.";
+        nc->flags |= MG_F_OTA_FAILED;
+        return;
+      }
+
+      // Construct new OTA handle for application
+      OTA::Handle* ota = new OTA::AppHandle();
+      if (ota == nullptr)
+      {
+        ESP_LOGE(TAG, "Failed to construct OTA handle.");
+
+        // Mark OTA as failed and append reason
+        response += "OTA update init failed.";
+        nc->flags |= MG_F_OTA_FAILED;
+        return;
+      }
+
+      ESP_LOGI(TAG, "Starting OTA...");
+      esp_err_t result = ota->start();
+      if (result != ESP_OK)
+      {
+        ESP_LOGE(TAG, "Failed to start OTA. Error: %s", esp_err_to_name(result));
+
+        // Mark OTA as failed and append reason
+        response += "OTA update init failed.";
+        nc->flags |= MG_F_OTA_FAILED;
+
+        // Kill the handle
+        delete ota;
+        multipart->user_data = nullptr;
+        return;
+      }
+
+      // Save the handle for reference in future calls
+      multipart->user_data = (void*) ota;
+      break;
+    }
+
+    case MG_EV_HTTP_PART_DATA:
+    {
+      struct mg_http_multipart_part* multipart = (struct mg_http_multipart_part*) ev_data;
+
+      // Something went wrong so ignore the data
+      if (nc->flags & MG_F_OTA_FAILED)
+        return;
+
+      // Fetch handle from user_data
+      OTA::Handle* ota = (OTA::Handle*) multipart->user_data;
+      if (ota == nullptr)
+        return;
+
+      if (ota->write((uint8_t*) multipart->data.p, multipart->data.len) != ESP_OK)
+      {
+        // Mark OTA as failed and append reason
+        response += "OTA write failed.";
+        nc->flags |= MG_F_OTA_FAILED;
+      }
+      break;
+    }
+
+    case MG_EV_HTTP_PART_END:
+    {
+      struct mg_http_multipart_part* multipart = (struct mg_http_multipart_part*) ev_data;
+      
+      // Fetch handle from user_data
+      OTA::Handle* ota = (OTA::Handle*) multipart->user_data;
+      if (ota == nullptr)
+        return;
+
+      // Even if MG_F_OTA_FAILED is set we should let the OTA try to clean up
+
+      ESP_LOGI(TAG, "Ending OTA...");
+      OTA::end_result_t result = ota->end();
+
+      // Save callback
+      callbacks.push(result.callback);
+
+      // Update response if error
+      if (result.status != ESP_OK)
+      {
+        response += "OTA end failed.";
+        nc->flags |= MG_F_OTA_FAILED;
+      }
+
+      // Free the handle object and reference
+      delete ota;
+      multipart->user_data = nullptr;
+      break;
+    }
+
+    case MG_EV_HTTP_MULTIPART_REQUEST_END:
+    {
+      // Send the appropriate reply 
+      const char* reply = nc->flags & MG_F_OTA_FAILED ? response.c_str() : "OTA update successful.";
+      
+      mg_send_head(nc, nc->flags & MG_F_OTA_FAILED ? 500 : 200, strlen(reply), "Content-Type: text/html");
+      mg_printf(nc, reply);
+      nc->flags |= MG_F_SEND_AND_CLOSE;
+
+      // Signal OTA is complete
+      nc->flags |= MG_F_OTA_COMPLETE;
+
+      response.clear();
+      break;
+    }
+
+    case MG_EV_CLOSE:
+    {
+      // Ignore close events that aren't after an OTA
+      if ((nc->flags & MG_F_OTA_COMPLETE) != MG_F_OTA_COMPLETE)
+       return;
+      
+      // Fire callbacks once OTA connection has closed
+      while (callbacks.empty() == false)
+      {
+        OTA::end_callback_t callback = callbacks.front();
+        if (callback)
+          callback();
+
+        callbacks.pop();
+      }
+    
+     break; 
+    }
+  }
+}
+
+/**
   @brief  Main task function of the HTTP server
   
   @param  pvParameters
@@ -236,6 +415,9 @@ void HTTP::task(void* pvParameters)
 
   // Enable HTTP on the connection
   mg_set_protocol_http_websocket(connection);
+
+  // Special handler for OTA page
+  mg_register_http_endpoint(connection, "/ota", otaEventHandler, nullptr);
 
   // Construct the PCM stream object
   StreamConfig pcm("PCM", "Content-Type: audio/L16;rate=48000;channels=2\r\nAccept-Ranges: none\r\nCache-Control: no-cache,no-store,must-revalidate,max-age=0\r\n");

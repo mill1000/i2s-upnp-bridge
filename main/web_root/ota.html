@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Firmware Update</title>
+<style>
+  html {font-family: sans-serif;}
+  body {margin-left: 20vw; margin-right: 20vw;}
+  h2 {font-weight: 500;}
+  input[type="submit"] {float: right;}
+  #loader {
+  height: 1.5rem;
+  width: 100%;
+  position: relative;
+  overflow: hidden;
+  background-color: #f3f3f3;
+  margin: .5rem 0;
+  border-radius: 0.5rem;
+}
+
+#progress{
+  position: absolute;
+  height: 100%;
+  border-radius: 0.5rem;
+  }
+
+.done{
+  background-color:green;
+  width: 100%;
+  }
+
+.failed{
+  background-color:red;
+  width: 100%;
+  }
+
+.working {
+  background-color: rgb(0, 255, 200);
+  animation: loading 2s cubic-bezier(0.4, 0, 0.4, 1) infinite;
+}
+
+@keyframes loading {
+  from {left: -30%; width: 30%;}
+  to {left: 100%; width:30%}
+}
+</style>
+</head>
+<body>
+<h2>Firmware Update</h2>
+<span id="status">Ready</span>
+<div id="loader">
+  <div id="progress"></div>
+</div>
+<form action="javascript:void(0);" onsubmit="startUpdate()">
+  <input type="file" id="file" accept=".bin" >
+  <input type="submit" value="Start Update">
+</form>
+
+<script>
+var Status = {
+  _element: document.getElementById("status"),
+
+  set: function (message) {
+    this._element.innerHTML = message;
+  },
+}
+
+function startUpdate() {
+  let file = document.getElementById("file").files[0];
+
+  if (!file) {
+    Status.set("No file selected.");
+    return;
+  }
+
+  let progress = document.getElementById("progress");
+
+  let xhr = new XMLHttpRequest();
+
+  xhr.upload.addEventListener("progress", (e) => {
+    if (e.lengthComputable) {
+      if (e.loaded == e.total)
+        Status.set("Upload complete. Update in progress...");
+    }
+  }, false);
+
+  xhr.onreadystatechange = () => {
+    if (xhr.readyState == XMLHttpRequest.DONE) {
+      var success = (xhr.status == 200);
+      if (success) {
+        message = "Update complete.";
+      }
+      else {
+        message = "Update failed. Error: ";
+        message += (xhr.status != 0) ? xhr.responseText : "Timeout";
+      }
+
+      Status.set(message);
+      progress.classList = success ? "done" : "failed";
+    }
+  };
+
+  let formData = new FormData();
+  formData.append("firmware", file);
+
+  Status.set("Upload in progress...");
+  progress.classList = "working";
+
+  xhr.open("POST", window.location.href);
+  //xhr.timeout = 30000;
+  xhr.send(formData);
+}
+</script>
+</body>
+</html>
