@@ -11,4 +11,10 @@ menu "Project Configuration"
         default "mypassword"
         help
             WiFi password (WPA or WPA2) of network.
+
+    config LWIP_LOCAL_HOSTNAME
+        string "Hostname"
+        default "I2S Bridge"
+        help
+            Hostname for this device.
 endmenu
