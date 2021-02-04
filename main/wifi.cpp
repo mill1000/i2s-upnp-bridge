@@ -1,6 +1,7 @@
 #include "esp_wifi.h"
 #include "esp_err.h"
 #include "esp_log.h"
+#include "freertos/timers.h"
 
 #include <cstring>
 #include <string>
@@ -54,7 +55,16 @@ static void wifiEventHandler(void* arg, esp_event_base_t event_base, int32_t eve
         esp_wifi_connect();
       }
       else
+      {
         ESP_LOGE(TAG, "Failed to connect.");
+
+        ESP_LOGI(TAG, "Retrying in 60 seconds.");
+        TimerHandle_t retryTimer = xTimerCreate("wifiRetry", pdMS_TO_TICKS(60000), pdFALSE, nullptr, [](TimerHandle_t timer){
+          retry_count = WiFi::RETRY_COUNT;
+          esp_wifi_connect();
+        });
+        xTimerStart(retryTimer, portMAX_DELAY);
+      }
       
       break;
     } 
