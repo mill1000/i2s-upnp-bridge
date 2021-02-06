@@ -6,6 +6,8 @@
 
 namespace HTTP
 {
+  constexpr int CLIENT_QUEUE_LENGTH = 3;
+
   // Object to represent a stream configuration
   struct StreamConfig
   {
@@ -15,8 +17,6 @@ namespace HTTP
 
     StreamConfig(const char* name, const char* headers) : name(name), headers(headers) {}
   };
-
-  constexpr int CLIENT_QUEUE_LENGTH = 3;
 
   void task(void* pvParameters);
   void queue_samples(const I2S::sample_buffer_t& samples);

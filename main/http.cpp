@@ -18,7 +18,7 @@
 #define TAG "HTTP"
 
 static std::unordered_set<struct mg_connection*> clients;
-static SemaphoreHandle_t clientMutex;
+static SemaphoreHandle_t client_mutex;
 
 /**
   @brief  Mongoose event handler to stream audio data to clients
@@ -39,12 +39,12 @@ static void httpStreamEventHandler(struct mg_connection* nc, int ev, void* ev_da
       mg_sock_addr_to_str(&nc->sa, addr, sizeof(addr), MG_SOCK_STRINGIFY_IP | MG_SOCK_STRINGIFY_PORT);
 
       // Lock the client list
-      xSemaphoreTake(clientMutex, portMAX_DELAY);
+      xSemaphoreTake(client_mutex, portMAX_DELAY);
 
       if (clients.count(nc))
       {
         ESP_LOGW(TAG, "Client %p (%s) already exists.", nc, addr);
-        xSemaphoreGive(clientMutex);
+        xSemaphoreGive(client_mutex);
         return;
       }
 
@@ -53,7 +53,7 @@ static void httpStreamEventHandler(struct mg_connection* nc, int ev, void* ev_da
       if (queue == nullptr)
       {
         ESP_LOGE(TAG, "Failed to create queue for client %p (%s).", nc, addr);
-        xSemaphoreGive(clientMutex);
+        xSemaphoreGive(client_mutex);
         return;
       }
 
@@ -64,20 +64,20 @@ static void httpStreamEventHandler(struct mg_connection* nc, int ev, void* ev_da
       if (clients.size() == 1)
         System::set_active_state();
 
-      xSemaphoreGive(clientMutex);
+      xSemaphoreGive(client_mutex);
 
       // Grab the stream object from the user_data
-      HTTP::StreamConfig* streamConfig = (HTTP::StreamConfig*) user_data;
-      assert(streamConfig != nullptr);
+      HTTP::StreamConfig* stream_config = (HTTP::StreamConfig*) user_data;
+      assert(stream_config != nullptr);
 
-      ESP_LOGI(TAG, "New %s client %p (%s).", streamConfig->name, nc, addr);
+      ESP_LOGI(TAG, "New %s client %p (%s).", stream_config->name, nc, addr);
 
       // Send the HTTP header
-      mg_send_response_line(nc, 200, streamConfig->headers);
+      mg_send_response_line(nc, 200, stream_config->headers);
 
       // Perform additional setup if needed
-      if (streamConfig->setup)
-        streamConfig->setup(nc);
+      if (stream_config->setup)
+        stream_config->setup(nc);
 
       // Reassign event handler for this client
       nc->handler = httpStreamEventHandler;
@@ -114,14 +114,14 @@ static void httpStreamEventHandler(struct mg_connection* nc, int ev, void* ev_da
         ESP_LOGE(TAG, "No queue for client %p (%s).", nc, addr);
 
       // Remove the client
-      xSemaphoreTake(clientMutex, portMAX_DELAY);
+      xSemaphoreTake(client_mutex, portMAX_DELAY);
       clients.erase(nc);
       
       // Notify system of last client
       if (clients.empty())
         System::set_idle_state();
 
-      xSemaphoreGive(clientMutex);
+      xSemaphoreGive(client_mutex);
 
       break;
     }
@@ -390,8 +390,8 @@ void HTTP::task(void* pvParameters)
 {
   ESP_LOGI(TAG, "Starting HTTP server.");
 
-  clientMutex = xSemaphoreCreateMutex();
-  if (clientMutex == nullptr)
+  client_mutex = xSemaphoreCreateMutex();
+  if (client_mutex == nullptr)
   {
     ESP_LOGE(TAG, "Failed to create client mutex.");
     return;
@@ -452,7 +452,7 @@ void HTTP::task(void* pvParameters)
 void HTTP::queue_samples(const I2S::sample_buffer_t& samples)
 {
   // Lock the client list
-  if (clientMutex == nullptr || xSemaphoreTake(clientMutex, pdMS_TO_TICKS(200)) != pdTRUE)
+  if (client_mutex == nullptr || xSemaphoreTake(client_mutex, pdMS_TO_TICKS(200)) != pdTRUE)
   {
     ESP_LOGE(TAG, "Failed to lock client mutex.");
     return;
@@ -480,5 +480,5 @@ void HTTP::queue_samples(const I2S::sample_buffer_t& samples)
       ESP_LOGE(TAG, "Failed to queue samples for %p.", nc);
   }
 
-  xSemaphoreGive(clientMutex);
+  xSemaphoreGive(client_mutex);
 }

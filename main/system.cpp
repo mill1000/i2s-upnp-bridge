@@ -11,7 +11,7 @@
 
 #define TAG "System"
 
-static TaskHandle_t taskHandle;
+static TaskHandle_t task_handle;
 
 /**
   @brief  Main system task which reads from I2S and updates system state
@@ -21,13 +21,13 @@ static TaskHandle_t taskHandle;
 */
 void System::task(void* pvParameters)
 {
-  taskHandle = xTaskGetCurrentTaskHandle();
+  task_handle = xTaskGetCurrentTaskHandle();
 
   // Construct timer to trigger state checks
-  TimerHandle_t stateTimer = xTimerCreate("stateTimer", pdMS_TO_TICKS(250), pdTRUE, taskHandle, [](TimerHandle_t timer){
+  TimerHandle_t state_timer = xTimerCreate("stateTimer", pdMS_TO_TICKS(250), pdTRUE, task_handle, [](TimerHandle_t timer){
     xTaskNotify(pvTimerGetTimerID(timer), event_update_audio_state, eSetBits);
   });
-  xTimerStart(stateTimer, portMAX_DELAY);
+  xTimerStart(state_timer, portMAX_DELAY);
 
   // Struct to track state of audio
   struct
@@ -114,7 +114,7 @@ void System::task(void* pvParameters)
 */
 void System::set_active_state()
 {
-  xTaskNotify(taskHandle, event_set_active_state, eSetBits);
+  xTaskNotify(task_handle, event_set_active_state, eSetBits);
 }
 
 /**
@@ -125,5 +125,5 @@ void System::set_active_state()
 */
 void System::set_idle_state()
 {
-  xTaskNotify(taskHandle, event_set_idle_state, eSetBits);
+  xTaskNotify(task_handle, event_set_idle_state, eSetBits);
 }

@@ -22,12 +22,12 @@ std::string JSON::get_renderers()
   // Get all renders known to UPNP
   UpnpControl::renderer_map_t renderers = UpnpControl::get_known_renderers();
  
-  nlohmann::json jRenderers = nlohmann::json::object();
+  nlohmann::json json_renderers = nlohmann::json::object();
 
   // Add an entry for each object
   for (auto& kv : renderers)
   {
-    nlohmann::json& j = jRenderers[kv.first];
+    nlohmann::json& j = json_renderers[kv.first];
     const UPNP::Renderer& r = kv.second;
 
     j["uuid"] = r.uuid;
@@ -38,7 +38,7 @@ std::string JSON::get_renderers()
 
   // Add renderer object to root
   nlohmann::json root;
-  root["renderers"] = jRenderers;
+  root["renderers"] = json_renderers;
 
   return root.dump();
 }
@@ -62,13 +62,14 @@ bool JSON::parse_renderers(const std::string& jString)
   // Parse renderers object
   if (root.contains("renderers"))
   {
-    const nlohmann::json& jRenderers = root.at("renderers");
     std::map<std::string, std::string> selected;
-    for (const auto& kv : jRenderers.items())
+
+    const nlohmann::json& renderers = root.at("renderers");
+    for (const auto& kv : renderers.items())
     {
-      const nlohmann::json& jRenderer = kv.value();
-      if (jRenderer["selected"].get<bool>())
-        selected[jRenderer["uuid"].get<std::string>()] = jRenderer["name"].get<std::string>();
+      const nlohmann::json& renderer = kv.value();
+      if (renderer["selected"].get<bool>())
+        selected[renderer["uuid"].get<std::string>()] = renderer["name"].get<std::string>();
     }
 
     NVS::erase_renderers();

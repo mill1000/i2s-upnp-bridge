@@ -34,7 +34,7 @@ void I2S::init()
   config.fixed_mclk = 0; // Use automatic dividers
   config.intr_alloc_flags = ESP_INTR_FLAG_LEVEL1; // ??
 
-  // Configre the I2S driver
+  // Configure the I2S driver
   i2s_driver_install(I2S_NUM_0, &config, 0, NULL);
 
   i2s_pin_config_t pin_config;
@@ -58,13 +58,13 @@ void I2S::init()
 
   @param  samples Buffer to store sample data to
   @param  length Number of bytes (not samples!) to read
-  @param  waitTicks Number of ticks to wait for data.
+  @param  wait_ticks Number of ticks to wait for data.
   @retval size_t - Actual number of bytes read
 */
-size_t I2S::read(sample_t samples[], size_t length, TickType_t waitTicks)
+size_t I2S::read(sample_t samples[], size_t length, TickType_t wait_ticks)
 {
   size_t read = 0;
-  i2s_read(I2S_NUM_0, samples, length, &read, waitTicks);
+  i2s_read(I2S_NUM_0, samples, length, &read, wait_ticks);
   
   return read;
 }

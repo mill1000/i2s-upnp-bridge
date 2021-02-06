@@ -8,7 +8,7 @@ namespace UPNP
   class Action
   {
     public:
-      int instanceId = 0;
+      int instance_id = 0;
 
       std::string headers() const
       {
@@ -50,7 +50,7 @@ namespace UPNP
       std::string soap_body() const
       {
         std::string body = R"(<u:SetAVTransportURI xmlns:u="urn:schemas-upnp-org:service:AVTransport:1">)";
-        body += "<InstanceID>" + std::to_string(this->instanceId) + "</InstanceID>";
+        body += "<InstanceID>" + std::to_string(this->instance_id) + "</InstanceID>";
         body += "<CurrentURI>" + this->uri + "</CurrentURI>";
         body += "<CurrentURIMetaData></CurrentURIMetaData>";
         body += "</u:SetAVTransportURI>";
@@ -69,7 +69,7 @@ namespace UPNP
       std::string soap_body() const
       {
         std::string body = R"(<u:Play xmlns:u="urn:schemas-upnp-org:service:AVTransport:1">)";
-        body += "<InstanceID>" + std::to_string(this->instanceId) + "</InstanceID>";
+        body += "<InstanceID>" + std::to_string(this->instance_id) + "</InstanceID>";
         body += "<Speed>" + std::to_string(this->speed) + "</Speed>";
         body += "</u:Play>";
         return body;
@@ -85,7 +85,7 @@ namespace UPNP
       std::string soap_body() const
       {
         std::string body = R"(<u:Stop xmlns:u="urn:schemas-upnp-org:service:AVTransport:1">)";
-        body += "<InstanceID>" + std::to_string(this->instanceId) + "</InstanceID>";
+        body += "<InstanceID>" + std::to_string(this->instance_id) + "</InstanceID>";
         body += "</u:Stop>";
         return body;
       }

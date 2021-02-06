@@ -18,7 +18,7 @@ namespace I2S
   typedef std::array<sample_t, 2 * BUFFER_SAMPLE_COUNT> sample_buffer_t;
 
   void init(void);
-  size_t read(sample_t* samples, size_t length = sizeof(sample_buffer_t), TickType_t waitTicks = portMAX_DELAY);
+  size_t read(sample_t* samples, size_t length = sizeof(sample_buffer_t), TickType_t wait_ticks = portMAX_DELAY);
   void flush_rx(void);
 }
 

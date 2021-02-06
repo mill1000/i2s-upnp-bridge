@@ -20,9 +20,9 @@
 
 #define TAG "UPNP"
 
-static QueueHandle_t upnpEventQueue;
-static UpnpControl::renderer_map_t discoveredRenderers;
-static SemaphoreHandle_t rendererMutex;
+static QueueHandle_t event_queue;
+static UpnpControl::renderer_map_t discovered_renderers;
+static SemaphoreHandle_t renderer_mutex;
 
 /**
   @brief  Parse the SSDP description XML into a UPNP::Renderer
@@ -53,14 +53,14 @@ UPNP::Renderer SSDP::parse_description(const std::string& host, const std::strin
   }
 
   // Extract friendly name from device description
-  tinyxml2::XMLElement* friendlyName = device->FirstChildElement("friendlyName");
-  if (friendlyName == nullptr)
+  tinyxml2::XMLElement* friendly_name = device->FirstChildElement("friendlyName");
+  if (friendly_name == nullptr)
   {
     ESP_LOGE(TAG, "Invalid description XML. Could not locate friendlyName element.");
     return UPNP::Renderer();
   }
 
-  std::string name = std::string(friendlyName->GetText());
+  std::string name = std::string(friendly_name->GetText());
 
   // Extract UDN from device description
   tinyxml2::XMLElement* UDN = device->FirstChildElement("UDN");
@@ -88,8 +88,8 @@ UPNP::Renderer SSDP::parse_description(const std::string& host, const std::strin
   // TODO icons
 
   // Grab service list to search for AVTransport
-  tinyxml2::XMLElement* serviceList = device->FirstChildElement("serviceList");
-  if (serviceList == nullptr)
+  tinyxml2::XMLElement* service_list = device->FirstChildElement("serviceList");
+  if (service_list == nullptr)
   {
     ESP_LOGE(TAG, "Invalid description XML. Could not locate serviceList element.");
     return UPNP::Renderer();
@@ -97,11 +97,11 @@ UPNP::Renderer SSDP::parse_description(const std::string& host, const std::strin
 
   // Extract the control URL from the AVTransport service
   std::string control_url;
-  tinyxml2::XMLElement* service = serviceList->FirstChildElement();
+  tinyxml2::XMLElement* service = service_list->FirstChildElement();
   while (service != nullptr) // Scan all services in serviceList
   {
-    tinyxml2::XMLElement* serviceType = service->FirstChildElement("serviceType");
-    if (serviceType == nullptr || std::string(serviceType->GetText()).compare("urn:schemas-upnp-org:service:AVTransport:1") != 0)
+    tinyxml2::XMLElement* service_type = service->FirstChildElement("serviceType");
+    if (service_type == nullptr || std::string(service_type->GetText()).compare("urn:schemas-upnp-org:service:AVTransport:1") != 0)
     {
       // Can't find serviceType element, or not AVTransport service
       service = service->NextSiblingElement();
@@ -109,10 +109,10 @@ UPNP::Renderer SSDP::parse_description(const std::string& host, const std::strin
     }
 
     // Grab control URL from matching service
-    tinyxml2::XMLElement* controlURL = service->FirstChildElement("controlURL");
-    if (controlURL != nullptr)
+    tinyxml2::XMLElement* control_url_element = service->FirstChildElement("controlURL");
+    if (control_url_element != nullptr)
     {
-      control_url = std::string(controlURL->GetText());
+      control_url = std::string(control_url_element->GetText());
       break;
     }
     
@@ -129,9 +129,9 @@ UPNP::Renderer SSDP::parse_description(const std::string& host, const std::strin
   
   // Grab the base URL if it exists
   std::string base_url;
-  tinyxml2::XMLElement* urlBase = root->FirstChildElement("URLBase");
-  if (urlBase != nullptr)
-    base_url = std::string(urlBase->GetText());
+  tinyxml2::XMLElement* url_base_element = root->FirstChildElement("URLBase");
+  if (url_base_element != nullptr)
+    base_url = std::string(url_base_element->GetText());
 
   // Build the base URL from the remote socket address if it's empty
   if (base_url.empty())
@@ -196,16 +196,16 @@ static void ssdpDescriptionEventHandler(struct mg_connection* nc, int ev, void* 
       ESP_LOGD(TAG, "Found renderer: %s - %s", renderer.name.c_str(), renderer.control_url.c_str());
 
       // Insert renderer into map
-      xSemaphoreTake(rendererMutex, portMAX_DELAY);
+      xSemaphoreTake(renderer_mutex, portMAX_DELAY);
       
       // Fetch renderer from map and create if needed
-      auto it = discoveredRenderers.emplace(renderer.uuid, renderer).first;
+      auto it = discovered_renderers.emplace(renderer.uuid, renderer).first;
       
       // Update name and control URL
       it->second.name = renderer.name;
       it->second.control_url = renderer.control_url;
 
-      xSemaphoreGive(rendererMutex);
+      xSemaphoreGive(renderer_mutex);
 
       break;
     }
@@ -230,10 +230,10 @@ static void ssdpDiscoveryEventHandler(struct mg_connection* nc, int ev, void* ev
   constexpr int32_t SSDP_MX = 5;
 
   // Search target we are looking for
-  const char* searchTarget = "urn:schemas-upnp-org:device:MediaRenderer:1";
+  const char* search_target = "urn:schemas-upnp-org:device:MediaRenderer:1";
 
   // SSDP search request to send
-  const char* ssdpSearchRequest =\
+  const char* ssdp_search_request =\
   "M-SEARCH * HTTP/1.1\r\n"\
   "HOST: 239.255.255.250:1900\r\n"\
   "MAN: \"ssdp:discover\"\r\n"\
@@ -259,7 +259,7 @@ static void ssdpDiscoveryEventHandler(struct mg_connection* nc, int ev, void* ev
       
       // Ignore advertisements not matching our search target
       struct mg_str* NT = mg_get_http_header(hm, "NT");
-      if (mg_vcasecmp(NT, searchTarget) != 0)
+      if (mg_vcasecmp(NT, search_target) != 0)
         return;
 
       // Extract NTS field
@@ -343,7 +343,7 @@ static void ssdpDiscoveryEventHandler(struct mg_connection* nc, int ev, void* ev
 
       // Ignore responses not matching our search target
       struct mg_str* ST = mg_get_http_header(hm, "ST");
-      if (mg_vcasecmp(ST, searchTarget) != 0)
+      if (mg_vcasecmp(ST, search_target) != 0)
       {
         ESP_LOGW(TAG, "Ignoring non-matching ST: %s", mg_str_string(ST).c_str());
         return;
@@ -413,7 +413,7 @@ static void ssdpDiscoveryEventHandler(struct mg_connection* nc, int ev, void* ev
 
       // Send a burst of search requests
       for (uint8_t i = 0; i < 3; i++)
-        mg_printf(search, ssdpSearchRequest, searchTarget, SSDP_MX);
+        mg_printf(search, ssdp_search_request, search_target, SSDP_MX);
 
       // Stop search after 5 seconds
       mg_set_timer(search, mg_time() + SSDP_MX);
@@ -438,13 +438,13 @@ void UpnpControl::task(void* pvParameters)
   bool enabled = false;
   
   // Create an event group to run the main loop from
-  upnpEventQueue = xQueueCreate(UpnpControl::EVENT_QUEUE_LENGTH, sizeof(UpnpControl::Event));
-  if (upnpEventQueue == NULL)
+  event_queue = xQueueCreate(UpnpControl::EVENT_QUEUE_LENGTH, sizeof(UpnpControl::Event));
+  if (event_queue == NULL)
     ESP_LOGE(TAG, "Failed to create event queue.");
 
   // Create a mutex to lock renderer list access
-  rendererMutex = xSemaphoreCreateMutex();
-  if (rendererMutex == nullptr)
+  renderer_mutex = xSemaphoreCreateMutex();
+  if (renderer_mutex == nullptr)
     ESP_LOGE(TAG, "Failed to create renderer mutex.");
 
   // Create and init a Mongoose manager
@@ -460,8 +460,8 @@ void UpnpControl::task(void* pvParameters)
 
   // Join the SSDP multcast group
   ip4_addr_t addr = { .addr = IPADDR_ANY };
-  ip4_addr_t groupAddr = { .addr = inet_addr("239.255.255.250") };
-  igmp_joingroup(&addr, &groupAddr);
+  ip4_addr_t group_addr = { .addr = inet_addr("239.255.255.250") };
+  igmp_joingroup(&addr, &group_addr);
 
   // Ensure renderers are loaded from NVS
   update_selected_renderers();
@@ -472,7 +472,7 @@ void UpnpControl::task(void* pvParameters)
     mg_mgr_poll(&manager, 1000);
 
     UpnpControl::Event event;
-    if (xQueueReceive(upnpEventQueue, &event, 0) != pdTRUE)
+    if (xQueueReceive(event_queue, &event, 0) != pdTRUE)
       continue;
 
     switch (event)
@@ -493,10 +493,10 @@ void UpnpControl::task(void* pvParameters)
         std::map<std::string, std::string> nvs_renderers = NVS::get_renderers();
 
         // Lock the renderer list
-        xSemaphoreTake(rendererMutex, portMAX_DELAY);
+        xSemaphoreTake(renderer_mutex, portMAX_DELAY);
 
         // Deselect all known renderers
-        for (auto& kv : discoveredRenderers)
+        for (auto& kv : discovered_renderers)
           kv.second.selected = false;
 
         // Select all renderers saved in NVS
@@ -505,13 +505,13 @@ void UpnpControl::task(void* pvParameters)
           const std::string& uuid = kv.first;
           const std::string& name = kv.second;
 
-          auto it = discoveredRenderers.emplace(uuid, UPNP::Renderer(uuid, name)).first;
+          auto it = discovered_renderers.emplace(uuid, UPNP::Renderer(uuid, name)).first;
           it->second.selected = true;
 
           ESP_LOGI(TAG, "Selected '%s' for playback.", it->second.name.c_str());
         }
 
-        xSemaphoreGive(rendererMutex);
+        xSemaphoreGive(renderer_mutex);
         break;
       }
 
@@ -568,9 +568,9 @@ void UpnpControl::task(void* pvParameters)
           delete url;
         };
 
-        xSemaphoreTake(rendererMutex, portMAX_DELAY);
+        xSemaphoreTake(renderer_mutex, portMAX_DELAY);
 
-        for (const auto& kv : discoveredRenderers)
+        for (const auto& kv : discovered_renderers)
         {
           const UPNP::Renderer& r = kv.second;
           
@@ -595,7 +595,7 @@ void UpnpControl::task(void* pvParameters)
           mg_connect_http(&manager, event_handler, url, r.control_url.c_str(), setUri.headers().c_str(), setUri.body().c_str());
         }
 
-        xSemaphoreGive(rendererMutex);
+        xSemaphoreGive(renderer_mutex);
         break;
       }
 
@@ -618,9 +618,9 @@ void UpnpControl::task(void* pvParameters)
             ESP_LOGE(TAG, "Failed Stop action. Code: %d Response: %s.", hm->resp_code, mg_str_string(&hm->resp_status_msg).c_str());
         };
 
-        xSemaphoreTake(rendererMutex, portMAX_DELAY);
+        xSemaphoreTake(renderer_mutex, portMAX_DELAY);
 
-        for (const auto& kv : discoveredRenderers)
+        for (const auto& kv : discovered_renderers)
         {
           const UPNP::Renderer& r = kv.second;
     
@@ -641,7 +641,7 @@ void UpnpControl::task(void* pvParameters)
           mg_connect_http(&manager, event_handler, nullptr, r.control_url.c_str(), stop.headers().c_str(), stop.body().c_str());
         }
 
-        xSemaphoreGive(rendererMutex);
+        xSemaphoreGive(renderer_mutex);
         break;
       }
 
@@ -664,8 +664,8 @@ void UpnpControl::task(void* pvParameters)
 */
 static void queue_event(UpnpControl::Event event)
 {
-  if (upnpEventQueue != NULL)
-    xQueueSendToBack(upnpEventQueue, &event, pdMS_TO_TICKS(10));
+  if (event_queue != NULL)
+    xQueueSendToBack(event_queue, &event, pdMS_TO_TICKS(10));
 }
 
 /**
@@ -718,12 +718,12 @@ void UpnpControl::update_selected_renderers()
 */
 UpnpControl::renderer_map_t UpnpControl::get_known_renderers()
 {
-  xSemaphoreTake(rendererMutex, portMAX_DELAY);
+  xSemaphoreTake(renderer_mutex, portMAX_DELAY);
   
   // Make a copy
-  renderer_map_t renderers = discoveredRenderers;
+  renderer_map_t renderers = discovered_renderers;
   
-  xSemaphoreGive(rendererMutex);
+  xSemaphoreGive(renderer_mutex);
 
   return renderers;
 }
