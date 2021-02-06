@@ -86,7 +86,10 @@ static void httpStreamEventHandler(struct mg_connection* nc, int ev, void* ev_da
     }
 
     case MG_EV_SEND:
+    case MG_EV_POLL:
     {
+      // Service queues on every poll or send event
+
       // Get queue handle from the connection
       QueueHandle_t queue = (QueueHandle_t) nc->user_data;
       assert(queue != nullptr);
@@ -94,23 +97,7 @@ static void httpStreamEventHandler(struct mg_connection* nc, int ev, void* ev_da
       I2S::sample_buffer_t samples;
       while (xQueueReceive(queue, samples.data(), 0) == pdTRUE)
         mg_send(nc, samples.data(), sizeof(samples));
-  
-      break;
-    }
 
-    case MG_EV_POLL:
-    {
-      // If send buffer if empty, attempt to start sending data
-      if (nc->send_mbuf.len == 0)
-      {
-        // Get queue handle from the connection
-        QueueHandle_t queue = (QueueHandle_t) nc->user_data;
-        assert(queue != nullptr);
-    
-        I2S::sample_buffer_t samples;
-        while (xQueueReceive(queue, samples.data(), 0) == pdTRUE)
-          mg_send(nc, samples.data(), sizeof(samples));
-      }
       break;
     }
 
