@@ -131,7 +131,7 @@ static void httpStreamEventHandler(struct mg_connection* nc, int ev, void* ev_da
       clients.erase(nc);
       
       // Notify system of last client
-      if (clients.size() == 0)
+      if (clients.empty())
         System::set_idle_state();
 
       xSemaphoreGive(clientMutex);
