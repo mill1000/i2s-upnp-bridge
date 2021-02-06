@@ -280,9 +280,10 @@ static void ssdpDescriptionEventHandler(struct mg_connection* nc, int ev, void* 
       // Fetch renderer from map and create if needed
       auto it = discovered_renderers.emplace(renderer.uuid, renderer).first;
       
-      // Update name and control URL
+      // Update name, control and icon URLs
       it->second.name = renderer.name;
       it->second.control_url = renderer.control_url;
+      it->second.icon_url = renderer.icon_url;
 
       xSemaphoreGive(renderer_mutex);
 
