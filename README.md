@@ -1,10 +1,10 @@
 # I2S UPnP Bridge
-Snoop an I2S bus and stream the audio to UPnP renderers with an ESP32. Audio samples are available as raw PCM and WAV streams via HTTP. Playback on selected UPnP renderers is automatically started when activity is detected.
+Sniff audio from an I2S bus and stream it over HTTP with an ESP32. Audio samples are available as WAV and raw `audio/L16` streams via HTTP. Playback on selected UPnP renderers is automatically started when audio activity is detected.
 
-![Diagram](images/diagram.png)
+![Diagram](docs/diagram.png)
 
 ## Manual Streaming
-The audio streams are always available at the following endpoints:
+The audio streams are available at the following endpoints:
 * `http://your-device-ip-address/stream.wav`
 * `http://your-device-ip-address/stream.pcm`
 
@@ -15,12 +15,12 @@ A simple web interface is provided to select renderers for automatic control. Re
 
 The web interface can be found at `http://your-device-ip-address`
 
-![Web Interface](images/web_interface.png)
+![Web Interface](docs/web_interface.png)
 
 ## Echo Dot Integration
-The real motivation behind this project was to find a way to stream Amazon Music via the Raspberry Pi + DAC HAT I was already using. Unfortunately, it seems that neither Amazon, nor Google, are interested in making their protocols freely available.
+The real motivation behind this project was to find a way to stream Amazon Music via a Raspberry Pi + DAC HAT I already had. Unfortunately, it seems that neither Amazon, nor Google, are interested in making their protocols freely available.
 
-Based on other's work, I knew it was possible to get audio data from an Echo Dot by snooping the I2S bus on it's way to the DAC.
+Based on other's work, I knew it was possible to get audio data from an Echo Dot by sniffing the I2S bus on it's way to the DAC.
 * [Hi-Fi Digital Audio from the Echo Dot](https://hackaday.io/project/28109-hi-fi-digital-audio-from-the-echo-dot)
 * [S/PDIF from Echo Dot](https://hackaday.io/project/162309-spdif-from-echo-dot)
 
@@ -29,30 +29,30 @@ Similarly it is possible on a Google Home Mini, but with some caveats. e.g. not 
 
 ### I2S Wiring
 The Echo Dot uses a TI TLV320DAC3203 to convert digital audio to an analog for it's internal speaker and headphone jack. Using the data sheet its trivia to identify which traces on the PCB carry I2S data.
-![Pins](images/pins.jpg)
+![Pins](docs/pins.jpg)
 
 I made solder points by scraping soldermask away.
-![Solder Points](images/solder_points.jpg)
+![Solder Points](docs/solder_points.jpg)
 
-With a steady hand, some luck, and solder I wired the following signals on the Echo Dot PCB to the ESP32.
+With a steady hand, solder, and some luck, I wired the following signals on the Echo Dot PCB to the ESP32.
 * WCLK - GPIO12
 * BCLK - GPIO14
 * DIN - GPIO27
 * GND - Ground
 
 The wires were secured to the board using UV glue to provide strain relief. The additional 2 wires were for additional experiments and can be ignored.
-![Wires](images/wires.jpg)
+![Wires](docs/wires.jpg)
 
 ### Disabling DSP
 The Echo Dot uses a large amount of DSP to improve the internal speaker sound. It also mixes down to mono. This is disabled when the headphone jack is inserted. Compare these two clips to see for yourself:
-* [DSP On](images/dsp_on.wav)
-* [DSP Off](images/dsp_off.wav)
+* [DSP On](docs/dsp_on.wav)
+* [DSP Off](docs/dsp_off.wav)
 
 For this application we need the DSP disabled. The solution is to insert a headphone plug or other substitute into the jack to actuate the internal switches. I used a Q-tip with a small amount of heatshrink to get a snug fit.
-![Dummy Headphone Plug](images/dummy_plug.jpg)
+![Dummy Headphone Plug](docs/dummy_plug.jpg)
 
 ### Physical Assembly
 As I had no use for the internal speaker I gutted it's cavity and installed an ESP32 Dev Kit C into the space. After cutting down the pins the entire design fits back in the original enclosure for a nice clean solution. Additionally I left the ribbon cable to the LED/microphone board disconnected.
-![Pins](images/speaker_cutaway.jpg)
-![Pins](images/speaker_closed.jpg)
-![Pins](images/final_assembly.jpg)
+![Pins](docs/speaker_cutaway.jpg)
+![Pins](docs/speaker_closed.jpg)
+![Pins](docs/final_assembly.jpg)
