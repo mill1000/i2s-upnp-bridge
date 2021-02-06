@@ -104,6 +104,9 @@ var table = new Tabulator("#table", {
   data: [],
   
   columns: [
+    { title: "Icon", field: "icon_url", hozAlign: "center", formatter: "image", formatterParams: {
+      height: "64px", width: "64px",
+    }},
     { title: "Name", field: "name"},
     { title: "UUID", field: "uuid"},
     { title: "Location", field: "control_url"},

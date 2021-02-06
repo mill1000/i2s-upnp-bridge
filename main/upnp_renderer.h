@@ -11,6 +11,7 @@ namespace UPNP
       const std::string uuid;
       std::string name;
       std::string control_url;
+      std::string icon_url;
       bool selected = false;
 
       Renderer() {}

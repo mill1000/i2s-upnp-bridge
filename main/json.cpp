@@ -33,6 +33,7 @@ std::string JSON::get_renderers()
     j["uuid"] = r.uuid;
     j["name"] = r.name;
     j["control_url"] = r.control_url;
+    j["icon_url"] = r.icon_url;
     j["selected"] = r.selected;
   }
 

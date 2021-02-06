@@ -9,7 +9,6 @@
 #include <string>
 #include <map>
 
-#include "ssdp.h"
 #include "upnp_control.h"
 #include "upnp.h"
 #include "upnp_renderer.h"
@@ -24,6 +23,109 @@ static QueueHandle_t event_queue;
 static UpnpControl::renderer_map_t discovered_renderers;
 static SemaphoreHandle_t renderer_mutex;
 
+namespace SSDP
+{
+/**
+  @brief  Find a device's icon URL for the largest icon
+  
+  @param  device XML device description
+  @retval std::string
+*/
+std::string find_icon_url(const tinyxml2::XMLElement* device)
+{
+  // Try to fetch the icon list
+  const tinyxml2::XMLElement* icon_list = device->FirstChildElement("iconList");
+  if (icon_list == nullptr)
+    return std::string();
+
+  std::string icon_url;
+  int32_t largest_icon_width = 0;
+
+  // Check each icon in the list
+  const tinyxml2::XMLElement* icon = icon_list->FirstChildElement();
+  while (icon != nullptr)
+  {
+    const tinyxml2::XMLElement* mimetype = icon->FirstChildElement("mimetype");
+    if (mimetype == nullptr || std::string(mimetype->GetText()).compare("image/png") != 0)
+    {
+      // Can't find mimetype or it's not image/png as we expect
+      icon = icon->NextSiblingElement();
+      continue;
+    }
+
+    // Fetch the icon's width
+    const tinyxml2::XMLElement* width = icon->FirstChildElement("width");
+    if (width == nullptr)
+    {
+      icon = icon->NextSiblingElement();
+      continue;
+    }
+    
+    // Check if this icon is larger than the last      
+    int32_t icon_width = std::atoi(width->GetText());
+    if (icon_width < largest_icon_width)
+    {
+      icon = icon->NextSiblingElement();
+      continue;
+    }
+
+    const tinyxml2::XMLElement* url = icon->FirstChildElement("url");
+    if (url != nullptr)
+    {
+      icon_url = std::string(url->GetText());
+      largest_icon_width = icon_width;
+    }
+    
+    // Fetch next icon
+    icon = icon->NextSiblingElement();
+    continue;
+  }
+
+  return icon_url;
+}
+
+/**
+  @brief  Find a device's control URL for the AVTransport service
+  
+  @param  device XML device description
+  @retval std::string
+*/
+std::string find_control_url(const tinyxml2::XMLElement* device)
+{
+  // Grab service list to search for AVTransport
+  const tinyxml2::XMLElement* service_list = device->FirstChildElement("serviceList");
+  if (service_list == nullptr)
+  {
+    ESP_LOGE(TAG, "Invalid description XML. Could not locate serviceList element.");
+    return std::string();
+  }
+
+  // Check each service in the list
+  const tinyxml2::XMLElement* service = service_list->FirstChildElement();
+  while (service != nullptr)
+  {
+    const tinyxml2::XMLElement* service_type = service->FirstChildElement("serviceType");
+    if (service_type == nullptr || std::string(service_type->GetText()).compare("urn:schemas-upnp-org:service:AVTransport:1") != 0)
+    {
+      // Can't find serviceType element, or not AVTransport service
+      service = service->NextSiblingElement();
+      continue;
+    }
+
+    // Return control URL if it exists
+    const tinyxml2::XMLElement* control_url = service->FirstChildElement("controlURL");
+    if (control_url != nullptr)
+      return std::string(control_url->GetText());
+    
+    // Fetch next service
+    service = service->NextSiblingElement();
+    continue;
+  }
+
+  // Failed
+  return std::string();
+}
+
 /**
   @brief  Parse the SSDP description XML into a UPNP::Renderer
   
@@ -31,7 +133,7 @@ static SemaphoreHandle_t renderer_mutex;
   @param  desc Description received from the device
   @retval UPNP::Renderer
 */
-UPNP::Renderer SSDP::parse_description(const std::string& host, const std::string& desc)
+UPNP::Renderer parse_description(const std::string& host, const std::string& desc)
 {
   // Build the XML document
   tinyxml2::XMLDocument xml_document;
@@ -84,49 +186,18 @@ UPNP::Renderer SSDP::parse_description(const std::string& host, const std::strin
     ESP_LOGE(TAG, "Invalid UUID for renderer: %s.", uuid.c_str());
     return UPNP::Renderer();
   }
-
-  // TODO icons
-
-  // Grab service list to search for AVTransport
-  tinyxml2::XMLElement* service_list = device->FirstChildElement("serviceList");
-  if (service_list == nullptr)
-  {
-    ESP_LOGE(TAG, "Invalid description XML. Could not locate serviceList element.");
-    return UPNP::Renderer();
-  }
-
+  
   // Extract the control URL from the AVTransport service
-  std::string control_url;
-  tinyxml2::XMLElement* service = service_list->FirstChildElement();
-  while (service != nullptr) // Scan all services in serviceList
-  {
-    tinyxml2::XMLElement* service_type = service->FirstChildElement("serviceType");
-    if (service_type == nullptr || std::string(service_type->GetText()).compare("urn:schemas-upnp-org:service:AVTransport:1") != 0)
-    {
-      // Can't find serviceType element, or not AVTransport service
-      service = service->NextSiblingElement();
-      continue;
-    }
-
-    // Grab control URL from matching service
-    tinyxml2::XMLElement* control_url_element = service->FirstChildElement("controlURL");
-    if (control_url_element != nullptr)
-    {
-      control_url = std::string(control_url_element->GetText());
-      break;
-    }
-    
-    // Fetch next service
-    service = service->NextSiblingElement();
-    continue;
-  }
-
+  std::string control_url = find_control_url(device);
   if (control_url.empty())
   {
     ESP_LOGE(TAG, "Could not find control URL for AVTransport service.");
     return UPNP::Renderer();
   }
   
+  // Attempt to fetch icon URL
+  std::string icon_url = find_icon_url(device);
+
   // Grab the base URL if it exists
   std::string base_url;
   tinyxml2::XMLElement* url_base_element = root->FirstChildElement("URLBase");
@@ -137,7 +208,7 @@ UPNP::Renderer SSDP::parse_description(const std::string& host, const std::strin
   if (base_url.empty())
     base_url = "http://" + host;
 
-  // From trailing slash
+  // Trim trailing slash
   if (base_url.back() == '/')
     base_url.pop_back();
 
@@ -145,10 +216,18 @@ UPNP::Renderer SSDP::parse_description(const std::string& host, const std::strin
   if (control_url.front() == '/')
     control_url.erase(control_url.begin());
 
-  // Combine base and control URL with slash
-  control_url = base_url + "/" + control_url;
+  // Remove leading slash
+  if (icon_url.front() == '/')
+    icon_url.erase(icon_url.begin());
 
-  return UPNP::Renderer(uuid, name, control_url);
+  UPNP::Renderer renderer(uuid, name);
+
+  // Combine relative urls with base
+  renderer.control_url = base_url + "/" + control_url;
+  renderer.icon_url = base_url + "/" + icon_url;
+
+  return renderer;
+}
 }
 
 /**
