@@ -184,10 +184,10 @@ static void httpEventHandler(struct mg_connection* nc, int ev, void* ev_data, vo
 
         bool success = JSON::parse_renderers(buffer);
 
-        const char* errorString = success ? "Update successful." : "JSON parse failed.";
+        const char* error_string = success ? "Update successful." : "JSON parse failed.";
         
-        mg_send_head(nc, success ? 200 : 400, strlen(errorString), "Content-Type: text/html");
-        mg_printf(nc, errorString);
+        mg_send_head(nc, success ? 200 : 400, strlen(error_string), "Content-Type: text/html");
+        mg_printf(nc, error_string);
         nc->flags |= MG_F_SEND_AND_CLOSE;
       }
       else

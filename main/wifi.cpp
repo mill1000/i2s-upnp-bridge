@@ -59,11 +59,11 @@ static void wifiEventHandler(void* arg, esp_event_base_t event_base, int32_t eve
         ESP_LOGE(TAG, "Failed to connect.");
 
         ESP_LOGI(TAG, "Retrying in 60 seconds.");
-        TimerHandle_t retryTimer = xTimerCreate("wifiRetry", pdMS_TO_TICKS(60000), pdFALSE, nullptr, [](TimerHandle_t timer){
+        TimerHandle_t retry_timer = xTimerCreate("wifiRetry", pdMS_TO_TICKS(60000), pdFALSE, nullptr, [](TimerHandle_t timer){
           retry_count = WiFi::RETRY_COUNT;
           esp_wifi_connect();
         });
-        xTimerStart(retryTimer, portMAX_DELAY);
+        xTimerStart(retry_timer, portMAX_DELAY);
       }
       
       break;
