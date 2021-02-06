@@ -17,4 +17,13 @@ menu "Project Configuration"
         default "I2S Bridge"
         help
             Hostname for this device.
+
+    config ENABLE_AUTOMATIC_LIGHT_SLEEP
+        bool "Use automatic light sleep when possible."
+        default y
+        depends on PM_ENABLE
+        depends on FREERTOS_USE_TICKLESS_IDLE
+        help
+            Enable automatic light sleep when idle.
+
 endmenu
