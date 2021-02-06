@@ -7,7 +7,6 @@
 #include "esp_system.h"
 
 #include "ota_interface.h"
-#include "main.h"
 
 #define TAG "OTA"
 

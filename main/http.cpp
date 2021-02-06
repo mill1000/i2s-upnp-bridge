@@ -11,6 +11,7 @@
 #include "json.h"
 #include "mongoose.h"
 #include "ota_interface.h"
+#include "system.h"
 #include "utils.h"
 #include "wav.h"
 
@@ -58,6 +59,11 @@ static void httpStreamEventHandler(struct mg_connection* nc, int ev, void* ev_da
 
       nc->user_data = queue;
       clients.insert(nc);
+
+      // Notify system of first client
+      if (clients.size() == 1)
+        System::set_active_state();
+
       xSemaphoreGive(clientMutex);
 
       // Grab the stream object from the user_data
@@ -123,6 +129,11 @@ static void httpStreamEventHandler(struct mg_connection* nc, int ev, void* ev_da
       // Remove the client
       xSemaphoreTake(clientMutex, portMAX_DELAY);
       clients.erase(nc);
+      
+      // Notify system of last client
+      if (clients.size() == 0)
+        System::set_idle_state();
+
       xSemaphoreGive(clientMutex);
 
       break;
@@ -454,7 +465,7 @@ void HTTP::task(void* pvParameters)
 void HTTP::queue_samples(const I2S::sample_buffer_t& samples)
 {
   // Lock the client list
-  if (xSemaphoreTake(clientMutex, pdMS_TO_TICKS(200)) != pdTRUE)
+  if (clientMutex == nullptr || xSemaphoreTake(clientMutex, pdMS_TO_TICKS(200)) != pdTRUE)
   {
     ESP_LOGE(TAG, "Failed to lock client mutex.");
     return;

@@ -19,6 +19,7 @@ namespace I2S
 
   void init(void);
   size_t read(sample_t* samples, size_t length = sizeof(sample_buffer_t), TickType_t waitTicks = portMAX_DELAY);
+  void flush_rx(void);
 }
 
 #endif

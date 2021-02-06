@@ -68,3 +68,20 @@ size_t I2S::read(sample_t samples[], size_t length, TickType_t waitTicks)
   
   return read;
 }
+
+/**
+  @brief  Flush the RX queues by reading all available data
+
+  @param  none
+  @retval none
+*/
+void I2S::flush_rx()
+{
+  // Read until there's nothing left
+  size_t read = 0;
+  do
+  {
+    I2S::sample_buffer_t dummy;
+    i2s_read(I2S_NUM_0, dummy.data(), sizeof(dummy), &read, 0);
+  } while (read);
+}
