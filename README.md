@@ -35,7 +35,7 @@ I made solder points by scraping soldermask away.
 ![Solder Points](docs/solder_points.jpg)
 
 With a steady hand, solder, and some luck, I wired the following signals on the Echo Dot PCB to the ESP32.
-* WCLK - GPIO12
+* WCLK - GPIO26
 * BCLK - GPIO14
 * DIN - GPIO27
 * GND - Ground

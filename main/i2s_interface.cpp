@@ -42,15 +42,11 @@ void I2S::init()
 
   // Enable inputs for RX mode
   pin_config.bck_io_num = GPIO_NUM_14;
-  pin_config.ws_io_num = GPIO_NUM_12;
+  pin_config.ws_io_num = GPIO_NUM_26;
   pin_config.data_in_num = GPIO_NUM_27;
 
   // Enable pins
   i2s_set_pin(I2S_NUM_0, &pin_config);
-
-  // gpio_set_pull_mode(GPIO_NUM_27, GPIO_PULLUP_ONLY);
-  // gpio_set_pull_mode(GPIO_NUM_12, GPIO_PULLUP_ONLY);
-  // gpio_set_pull_mode(GPIO_NUM_14, GPIO_PULLUP_ONLY);
 }
 
 /**
