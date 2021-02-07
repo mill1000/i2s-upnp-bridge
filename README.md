@@ -51,8 +51,16 @@ The Echo Dot uses a large amount of DSP to improve the internal speaker sound. I
 For this application we need the DSP disabled. The solution is to insert a headphone plug or other substitute into the jack to actuate the internal switches. I used a Q-tip with a small amount of heatshrink to get a snug fit.
 ![Dummy Headphone Plug](docs/dummy_plug.jpg)
 
+### Disabling The Microphones
+The easiest method to permanently disable the Echo Dot's mics is to simply leave the LED & microphone board disconnected. However, the LEDs do provide feedback that the device is running and the buttons can be used to control the volume if desired.
+
+Another method is internally disable the power supply to the mics. This method effectively tricks the device into thinking the mute button was pressed. This can be done by soldering the two circled pads together. In this circuit Q1 is a high-side switch providing power to the mics, by shorting the gate to the source the switch is forced off.
+
+A nice little side effect of this approach is the two red LEDs next to the mute buttons are enabled.
+![Dummy Headphone Plug](docs/mic_disable.jpg)
+
 ### Physical Assembly
-As I had no use for the internal speaker I gutted it's cavity and installed an ESP32 Dev Kit C into the space. After cutting down the pins the entire design fits back in the original enclosure for a nice clean solution. Additionally I left the ribbon cable to the LED/microphone board disconnected.
+As I had no use for the internal speaker I gutted it's cavity and installed an ESP32 Dev Kit C into the space. After cutting down the pins the entire design fits back in the original enclosure for a nice clean solution. 
 ![Pins](docs/speaker_cutaway.jpg)
 ![Pins](docs/speaker_closed.jpg)
 ![Pins](docs/final_assembly.jpg)
