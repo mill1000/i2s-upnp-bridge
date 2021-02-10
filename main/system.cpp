@@ -43,8 +43,14 @@ void System::task(void* pvParameters)
   {
     static I2S::sample_buffer_t samples;
 
-    size_t read = I2S::read(samples.data(), sizeof(samples), portMAX_DELAY);
-    assert(read == sizeof(samples)); // We should always read the full size
+    size_t read = I2S::read(samples.data(), sizeof(samples), pdMS_TO_TICKS(5000));
+    if (read != sizeof(samples))
+    {
+      // I2S read did not return full buffer
+      ESP_LOGW(TAG, "Insufficient I2S data. Resetting I2S peripheral.");
+      I2S::reset();
+      continue;
+    }
 
     // Queue samples to each client when active
     if (state == State::Active)

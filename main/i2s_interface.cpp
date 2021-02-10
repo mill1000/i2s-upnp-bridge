@@ -81,3 +81,19 @@ void I2S::flush_rx()
     i2s_read(I2S_NUM_0, dummy.data(), sizeof(dummy), &read, 0);
   } while (read);
 }
+
+/**
+  @brief  Attempt to reset the I2S peripheral
+
+  @param  none
+  @retval none
+*/
+void I2S::reset()
+{
+  // Toggle the driver
+  i2s_stop(I2S_NUM_0);
+  i2s_start(I2S_NUM_0);
+
+  // Flush the RX data
+  flush_rx();
+}
