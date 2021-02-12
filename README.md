@@ -65,6 +65,9 @@ A good power supply is important. I experienced occasional stutters and dropouts
 ![Bad power supply](docs/bad_supply.png)
 #### Better Power Supply
 ![Improved power supply](docs/better_supply.png)
+#### Good Power Supply
+Arguably this one is running a little hot.
+![Good power supply](docs/good_supply.png)
 
 ### Physical Assembly
 As I had no use for the internal speaker I gutted it's cavity and installed an ESP32 Dev Kit C into the space. After cutting down the pins the entire design fits back in the original enclosure for a nice clean solution. 
