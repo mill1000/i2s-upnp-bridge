@@ -100,8 +100,8 @@ void System::task(void* pvParameters)
       ESP_LOGI(TAG, "System active.");
       state = State::Active;
 
-      // Flush the I2S interface since we've been sub-sampling in idle
-      I2S::flush_rx();
+      // Reset the I2S interface since we've been sub-sampling in idle
+      I2S::reset();
     }
 
     if (events & event_set_idle_state)
