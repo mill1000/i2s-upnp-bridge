@@ -3,12 +3,12 @@
 	url = https://github.com/cesanta/mongoose.git
 	branch = 6.18
 
-	[submodule "components/tinyxml2/tinyxml2"]
+[submodule "components/tinyxml2/tinyxml2"]
 	path = components/tinyxml2/tinyxml2
 	url = https://github.com/leethomason/tinyxml2.git
 	branch = 8.0.0
 
-	[submodule "components/nlohmann-json/json"]
+[submodule "components/nlohmann-json/json"]
 	path = components/nlohmann-json/json
 	url = https://github.com/nlohmann/json.git
 	branch = v3.9.1
