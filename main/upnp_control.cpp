@@ -376,7 +376,7 @@ static void ssdpDiscoveryEventHandler(struct mg_connection* nc, int ev, void* ev
 
       // Sscanf the max-age since std::regex is stack hungry
       uint32_t max_age = 0;
-      if (sscanf(cache_control.c_str(), "max-age=%d", &max_age) != 1)
+      if (sscanf(cache_control.c_str(), "max-age = %d", &max_age) != 1)
       {
         ESP_LOGE(TAG, "Could not extract max-age from SSDP CACHE-CONTROL: %s", cache_control.c_str());
         return;
@@ -446,7 +446,7 @@ static void ssdpDiscoveryEventHandler(struct mg_connection* nc, int ev, void* ev
 
       // Sscanf the max-age since std::regex is stack hungry
       uint32_t max_age = 0;
-      if (sscanf(cache_control.c_str(), "max-age=%d", &max_age) != 1)
+      if (sscanf(cache_control.c_str(), "max-age = %d", &max_age) != 1)
       {
         ESP_LOGE(TAG, "Could not extract max-age from SSDP CACHE-CONTROL: %s", cache_control.c_str());
         return;
