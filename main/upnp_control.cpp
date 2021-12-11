@@ -3,7 +3,7 @@
 #include "freertos/queue.h"
 #include "esp_err.h"
 #include "esp_log.h"
-#include "tcpip_adapter.h"
+#include "esp_netif.h"
 #include "lwip/igmp.h"
 
 #include <string>
@@ -603,10 +603,11 @@ void UpnpControl::task(void* pvParameters)
         // Start playback on selected renderers
 
         // Build URI for the stream
-        tcpip_adapter_ip_info_t info;
-        tcpip_adapter_get_ip_info(TCPIP_ADAPTER_IF_STA, &info);
+        esp_netif_ip_info_t info;
+        esp_netif_get_ip_info(esp_netif_get_handle_from_ifkey("WIFI_STA_DEF"), &info);
 
-        std::string uri = "http://" + std::string(ip4addr_ntoa(&info.ip)) + "/stream.wav";
+        char buffer[20] = {0};
+        std::string uri = "http://" + std::string(esp_ip4addr_ntoa(&info.ip, buffer, sizeof(buffer))) + "/stream.wav";
 
         // Mongoose handler to chain a Play action on success
         auto event_handler = [](struct mg_connection* nc, int ev, void* ev_data, void* user_data)
