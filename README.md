@@ -3,6 +3,9 @@ Sniff audio from an I2S bus and stream it over HTTP with an ESP32. Audio samples
 
 ![Diagram](docs/diagram.png)
 
+## Building
+This project currently targets esp-idf v4.1.x.
+
 ## Manual Streaming
 The audio streams are available at the following endpoints:
 * `http://your-device-ip-address/stream.wav`
