@@ -127,6 +127,52 @@ std::string find_control_url(const tinyxml2::XMLElement* device)
 }
 
 /**
+  @brief  Search the provided SSDP device and embedded devices for the first
+          device with a matching device type.
+  
+  @param  device Device node in description XML
+  @param  type UPNP device type to search for
+  @retval tinyxml2::XMLElement*
+*/
+const tinyxml2::XMLElement* find_device_by_type(const tinyxml2::XMLElement* device, const std::string& type)
+{
+  // Check the device type of the provided device
+  const tinyxml2::XMLElement* device_type = device->FirstChildElement("deviceType");
+  if (device_type == nullptr)
+  {
+    ESP_LOGE(TAG, "Invalid description XML. Could not locate deviceType element.");
+    return nullptr;
+  }
+
+  // Return the device if type matches
+  if (std::string(device_type->GetText()).compare(type) == 0)
+    return device;
+
+  // Otherwise search the deviceList if it exists
+  const tinyxml2::XMLElement* device_list = device->FirstChildElement("deviceList");
+  if (device_list == nullptr)
+  {
+    ESP_LOGI(TAG, "No deviceList element for deviceType: '%s'.", device_type->GetText());
+    return nullptr;
+  }
+
+  // Check each device in the list
+  device = device_list->FirstChildElement();
+  while (device != nullptr)
+  {
+    const tinyxml2::XMLElement* match = find_device_by_type(device, type);
+    if (match != nullptr)
+      return match;
+    
+    // Fetch next device
+    device = device->NextSiblingElement();
+  }
+
+  // Search failed
+  return nullptr;
+}
+
+/**
   @brief  Parse the SSDP description XML into a UPNP::Renderer
   
   @param  host The hostname or IP of the device
@@ -139,23 +185,31 @@ UPNP::Renderer parse_description(const std::string& host, const std::string& des
   tinyxml2::XMLDocument xml_document;
   xml_document.Parse(desc.c_str());
 
-  tinyxml2::XMLElement* root = xml_document.FirstChildElement("root");
+  const tinyxml2::XMLElement* root = xml_document.FirstChildElement("root");
   if (root == nullptr)
   {
     ESP_LOGE(TAG, "Invalid description XML. No root element.");
     return UPNP::Renderer();
   }
 
-  // Start decoding the device element for useful information
-  tinyxml2::XMLElement* device = root->FirstChildElement("device");
-  if (device == nullptr)
+  // Find the first device element
+  const tinyxml2::XMLElement* root_device = root->FirstChildElement("device");
+  if (root_device == nullptr)
   {
     ESP_LOGE(TAG, "Invalid description XML. Could not locate device element.");
     return UPNP::Renderer();
   }
 
+  // Find the first device that's a renderer
+  const tinyxml2::XMLElement* device = find_device_by_type(root_device, "urn:schemas-upnp-org:device:MediaRenderer:1");
+  if (device == nullptr)
+  {
+    ESP_LOGE(TAG, "Invalid description XML. Could not locate device element with expected deviceType.");
+    return UPNP::Renderer();
+  }
+
   // Extract friendly name from device description
-  tinyxml2::XMLElement* friendly_name = device->FirstChildElement("friendlyName");
+  const tinyxml2::XMLElement* friendly_name = device->FirstChildElement("friendlyName");
   if (friendly_name == nullptr)
   {
     ESP_LOGE(TAG, "Invalid description XML. Could not locate friendlyName element.");
@@ -165,7 +219,7 @@ UPNP::Renderer parse_description(const std::string& host, const std::string& des
   std::string name = std::string(friendly_name->GetText());
 
   // Extract UDN from device description
-  tinyxml2::XMLElement* UDN = device->FirstChildElement("UDN");
+  const tinyxml2::XMLElement* UDN = device->FirstChildElement("UDN");
   if (UDN == nullptr)
   {
     ESP_LOGE(TAG, "Invalid description XML. Could not locate UDN element.");
@@ -200,7 +254,7 @@ UPNP::Renderer parse_description(const std::string& host, const std::string& des
 
   // Grab the base URL if it exists
   std::string base_url;
-  tinyxml2::XMLElement* url_base_element = root->FirstChildElement("URLBase");
+  const tinyxml2::XMLElement* url_base_element = root->FirstChildElement("URLBase");
   if (url_base_element != nullptr)
     base_url = std::string(url_base_element->GetText());
 
