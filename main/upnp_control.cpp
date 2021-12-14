@@ -61,7 +61,7 @@ std::string find_icon_url(const tinyxml2::XMLElement* device)
       continue;
     }
     
-    // Check if this icon is larger than the last      
+    // Check if this icon is larger than the last
     int32_t icon_width = std::atoi(width->GetText());
     if (icon_width < largest_icon_width)
     {
@@ -255,7 +255,7 @@ static void ssdpDescriptionEventHandler(struct mg_connection* nc, int ev, void* 
   switch(ev)
   {
     case MG_EV_HTTP_REPLY:
-    {      
+    {
       char addr[32];
       mg_sock_addr_to_str(&nc->sa, addr, sizeof(addr), MG_SOCK_STRINGIFY_IP | MG_SOCK_STRINGIFY_PORT);
       std::string host = std::string(addr);
@@ -399,7 +399,7 @@ static void ssdpDiscoveryEventHandler(struct mg_connection* nc, int ev, void* ev
     {
       // SSDP uses HTTP over UDP. The responses to M-SEARCH do not contain a Content Length header so Mongoose
       // expects the stream to close to indicate completion, and trigger an MG_EV_HTTP_RESPONSE event. However, UDP
-      // is connectionless so we only get these MG_EV_HTTP_CHUNK events. Luckily SSDP bodes are always empty so the 
+      // is connectionless so we only get these MG_EV_HTTP_CHUNK events. Luckily SSDP bodes are always empty so the
       // response header is enough for us
 
       // Only process UDP data
@@ -563,7 +563,7 @@ void UpnpControl::task(void* pvParameters)
         break;
 
       case Event::Disable:
-        enabled = false; 
+        enabled = false;
         ESP_LOGI(TAG, "Control disabled.");
         break;
 

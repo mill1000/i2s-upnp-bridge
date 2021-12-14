@@ -12,7 +12,7 @@
 static NvsHelper nvs_renderers(NVS::RENDERERS_NAMESPACE);
 
 /**
-  @brief  Callback function for the NVS helper to report errors 
+  @brief  Callback function for the NVS helper to report errors
   
   @param  name Namespace that caused the error
   @param  key The paramter key that caused the error
@@ -59,7 +59,7 @@ void NVS::erase_renderers()
 {
   nvs_renderers.erase_all();
 
-  // Restore the version byte 
+  // Restore the version byte
   nvs_renderers.nvs_set<uint8_t>("version", NVS_VERSION);
   nvs_renderers.commit();
 }

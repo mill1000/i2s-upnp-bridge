@@ -345,7 +345,7 @@ static void otaEventHandler(struct mg_connection* nc, int ev, void* ev_data, voi
 
     case MG_EV_HTTP_MULTIPART_REQUEST_END:
     {
-      // Send the appropriate reply 
+      // Send the appropriate reply
       const char* reply = nc->flags & MG_F_OTA_FAILED ? response.c_str() : "OTA update successful.";
       
       mg_send_head(nc, nc->flags & MG_F_OTA_FAILED ? 500 : 200, strlen(reply), "Content-Type: text/html");
@@ -375,7 +375,7 @@ static void otaEventHandler(struct mg_connection* nc, int ev, void* ev_data, voi
         callbacks.pop();
       }
     
-     break; 
+     break;
     }
   }
 }

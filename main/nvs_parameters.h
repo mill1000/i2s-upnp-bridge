@@ -20,7 +20,7 @@ class NvsHelper
     NvsHelper(const std::string& name) : _namespace(name) {};
 
     esp_err_t open(nvs_callback_t callback = NULL)
-    {      
+    {
       this->callback = callback;
 
       return nvs_open(this->_namespace.c_str(), NVS_READWRITE, &this->handle);

@@ -45,7 +45,7 @@ std::string JSON::get_renderers()
 }
 
 /**
-  @brief  Parse the JSON settings received from the web interface 
+  @brief  Parse the JSON settings received from the web interface
           and store to the NVS
   
   @param  jString JSON string received from web interface

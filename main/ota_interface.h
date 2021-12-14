@@ -12,7 +12,7 @@ namespace OTA
 {
   typedef std::function<void(void)> end_callback_t;
   
-  struct end_result_t 
+  struct end_result_t
   {
     esp_err_t status;
     end_callback_t callback;

@@ -33,7 +33,7 @@ esp_err_t OTA::AppHandle::cleanup()
       ESP_LOGW(TAG, "Failed to delete timeout timer.");
   }
 
-  // Check for non-initalized or error state 
+  // Check for non-initalized or error state
   if (ota.state != State::InProgress)
   {
     ota.state = State::Idle;
