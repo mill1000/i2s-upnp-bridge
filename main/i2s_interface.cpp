@@ -27,7 +27,11 @@ void I2S::init()
   config.sample_rate = I2S::SAMPLE_FREQUENCTY;
   config.bits_per_sample = I2S_BITS_PER_SAMPLE_16BIT;
   config.channel_format = I2S_CHANNEL_FMT_RIGHT_LEFT;
+#if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(4, 2, 0)
+  config.communication_format = I2S_COMM_FORMAT_STAND_I2S;
+#else
   config.communication_format = (i2s_comm_format_t) (I2S_COMM_FORMAT_I2S | I2S_COMM_FORMAT_I2S_MSB);
+#endif
   config.dma_buf_count = I2S::BUFFER_COUNT;
   config.dma_buf_len = I2S::BUFFER_SAMPLE_COUNT;
   config.use_apll = true; // Use the better lock

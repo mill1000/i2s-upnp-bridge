@@ -15,7 +15,6 @@
 #include "mongoose.h"
 #include "nvs_interface.h"
 #include "tinyxml2.h"
-#include "utils.h"
 
 #define TAG "UPNP"
 

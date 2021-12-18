@@ -12,7 +12,6 @@
 #include "mongoose.h"
 #include "ota_interface.h"
 #include "system.h"
-#include "utils.h"
 #include "wav.h"
 
 #define TAG "HTTP"
