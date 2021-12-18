@@ -373,6 +373,48 @@ static void httpEventHandler(struct mg_connection* nc, int ev, void* ev_data, vo
 // }
 
 /**
+  @brief  Generic Mongoose event handler to redirect events based on URI
+  
+  @param  c Mongoose connection
+  @param  ev Mongoose event calling the function
+  @param  ev_data Event data pointer
+  @param  fn_data Function data pointer
+  @retval none
+*/
+static void mongooseEventHandler(struct mg_connection* c, int ev, void* ev_data, void* fn_data) 
+{
+  // Construct the PCM stream object
+  static HTTP::StreamConfig pcm("PCM", "Content-Type: audio/L16;rate=48000;channels=2\r\nAccept-Ranges: none\r\nCache-Control: no-cache,no-store,must-revalidate,max-age=0\r\n");
+
+  // Construct the WAV stream object
+  static HTTP::StreamConfig wav("WAV", "Content-Type: audio/wav\r\nAccept-Ranges: none\r\nCache-Control: no-cache,no-store,must-revalidate,max-age=0\r\n");
+  wav.setup = [](struct mg_connection* nc) // TODO does this get assigned every call?!
+  {
+    // Construct and send the WAV header
+    WAV::Header wav_header(48000);
+    mg_send(nc, &wav_header, sizeof(wav_header));
+  };
+
+  if (ev == MG_EV_HTTP_MSG) 
+  {
+    struct mg_http_message* hm = (struct mg_http_message*) ev_data;
+    if (mg_http_match_uri(hm, "/stream.pcm"))
+      httpStreamEventHandler(c, ev, ev_data, &pcm);
+    else if (mg_http_match_uri(hm, "/stream.wav"))
+      httpStreamEventHandler(c, ev, ev_data, &wav);
+    else if (mg_http_match_uri(hm, "/ota"))
+    {
+      // otaEventHandler(c, ev, ev_data, null);
+    }
+    else 
+    {
+      // Fallback to default handler
+      httpEventHandler(c, ev, ev_data, fn_data);
+    }
+  }
+}
+
+/**
   @brief  Main task function of the HTTP server
   
   @param  pvParameters
@@ -394,7 +436,7 @@ void HTTP::task(void* pvParameters)
   mg_mgr_init(&manager);
 
   // Connect bind to an address and specify the event handler
-  struct mg_connection* connection = mg_http_listen(&manager, "0.0.0.0:80", httpEventHandler, nullptr);
+  struct mg_connection* connection = mg_http_listen(&manager, "0.0.0.0:80", mongooseEventHandler, nullptr);
   if (connection == NULL)
   {
     ESP_LOGE(TAG, "Failed to bind port.");
@@ -402,25 +444,6 @@ void HTTP::task(void* pvParameters)
     vTaskDelete(NULL);
     return;
   }
-
-  // Special handler for OTA page
-  // mg_register_http_endpoint(connection, "/ota", otaEventHandler, nullptr);
-
-  // // Construct the PCM stream object
-  // StreamConfig pcm("PCM", "Content-Type: audio/L16;rate=48000;channels=2\r\nAccept-Ranges: none\r\nCache-Control: no-cache,no-store,must-revalidate,max-age=0\r\n");
-
-  // // Construct the WAV stream object
-  // StreamConfig wav("WAV", "Content-Type: audio/wav\r\nAccept-Ranges: none\r\nCache-Control: no-cache,no-store,must-revalidate,max-age=0\r\n");
-  // wav.setup = [](struct mg_connection* nc)
-  // {
-  //   // Construct and send the WAV header
-  //   WAV::Header wav_header(48000);
-  //   mg_send(nc, &wav_header, sizeof(wav_header));
-  // };
-
-  // Add separate end points for raw PCM and WAV stream
-  // mg_register_http_endpoint(connection, "/stream.pcm", httpStreamEventHandler, &pcm);
-  // mg_register_http_endpoint(connection, "/stream.wav", httpStreamEventHandler, &wav);
 
   // Loop waiting for events
   while(1)
