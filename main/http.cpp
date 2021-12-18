@@ -141,7 +141,7 @@ static void httpStreamEventHandler(struct mg_connection* nc, int ev, void* ev_da
 */
 static void httpEventHandler(struct mg_connection* nc, int ev, void* ev_data, void* fn_data)
 {
-  extern const uint8_t index_html[] asm("_binary_index_html_start");
+  extern const char index_html[] asm("_binary_index_html_start");
 
   switch(ev)
   {
@@ -153,7 +153,7 @@ static void httpEventHandler(struct mg_connection* nc, int ev, void* ev_data, vo
       if (mg_http_get_var(&hm->query, "action", action, sizeof(action)) == -1)
       {
         // Serve the page
-        mg_http_reply(nc, 200, "Content-Type: text/html\r\n", "%s", index_html);
+        mg_http_reply(nc, 200, "Content-Type: text/html\r\n", index_html);
         nc->is_draining = true;
         break;
       }
@@ -163,7 +163,7 @@ static void httpEventHandler(struct mg_connection* nc, int ev, void* ev_data, vo
 
         ESP_LOGI(TAG, "Get = %s", renderers.c_str());
 
-        mg_http_reply(nc, 200, "Content-Type: application/json\r\n", "%s", renderers.c_str());
+        mg_http_reply(nc, 200, "Content-Type: application/json\r\n", renderers.c_str());
         nc->is_draining = true;
     
         break;
