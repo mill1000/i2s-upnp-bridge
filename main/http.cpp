@@ -398,10 +398,10 @@ void HTTP::task(void* pvParameters)
   mg_mgr_init(&manager);
 
   // Connect bind to an address and specify the event handler
-  struct mg_connection* connection = mg_http_listen(&manager, "0.0.0.0:80", Warthog::mongoose_event_handler, &warthog);
+  struct mg_connection* connection = mg_http_listen(&manager, "http://0.0.0.0:80", Warthog::mongoose_event_handler, &warthog);
   if (connection == NULL)
   {
-    ESP_LOGE(TAG, "Failed to bind port.");
+    ESP_LOGE(TAG, "Failed to bind HTTP port.");
     mg_mgr_free(&manager);
     vTaskDelete(NULL);
     return;
