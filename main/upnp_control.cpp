@@ -13,6 +13,7 @@
 #include "upnp.h"
 #include "upnp_renderer.h"
 #include "mongoose.h"
+#include "warthog.h"
 #include "nvs_interface.h"
 #include "tinyxml2.h"
 
@@ -443,7 +444,7 @@ static void ssdpDiscoveryEventHandler(struct mg_connection* nc, int ev, void* ev
       }
 
       // Fetch description xml
-      mg_connect_http(nc->mgr, ssdpDescriptionEventHandler, nullptr, location.c_str(), nullptr, nullptr);
+      Warthog::http_connect_get(nc->mgr, location.c_str(), ssdpDescriptionEventHandler);
 
       break;
     }
@@ -468,9 +469,9 @@ static void ssdpDiscoveryEventHandler(struct mg_connection* nc, int ev, void* ev
       ESP_LOGD(TAG, "SSDP/HTTP Response: %s", std::string(hm->message.ptr, hm->body.ptr).c_str());
       
       // Ignore bad responses
-      if (hm->resp_code != 200)
+      if (Warthog::http_status_code(hm) != 200)
       {
-        ESP_LOGE(TAG, "Invalid SSDP search response: %s", mg_str_string(&hm->resp_status_msg).c_str());
+        ESP_LOGE(TAG, "Invalid SSDP search response: %s", Warthog::http_status_message(hm).c_str());
         return;
       }
 
@@ -513,7 +514,7 @@ static void ssdpDiscoveryEventHandler(struct mg_connection* nc, int ev, void* ev
       }
 
       // Fetch description xml
-      mg_connect_http(nc->mgr, ssdpDescriptionEventHandler, nullptr, location.c_str(), nullptr, nullptr);
+      Warthog::http_connect_get(nc->mgr, location.c_str(), ssdpDescriptionEventHandler);
 
       break;
     }
@@ -676,9 +677,9 @@ void UpnpControl::task(void* pvParameters)
           struct mg_http_message* hm = (struct mg_http_message*) ev_data;
             
           // Throw error on bad response
-          if (hm->resp_code != 200)
+          if (Warthog::http_status_code(hm) != 200)
           {
-            ESP_LOGE(TAG, "Failed SetAvTransportUri action. Code: %d Response: %s.", hm->resp_code, mg_str_string(&hm->resp_status_msg).c_str());
+            ESP_LOGE(TAG, "Failed SetAvTransportUri action. Code: %d Response: %s.", Warthog::http_status_code(hm), Warthog::http_status_message(hm).c_str());
             return;
           }
 
@@ -690,8 +691,8 @@ void UpnpControl::task(void* pvParameters)
             
             struct mg_http_message* hm = (struct mg_http_message*) ev_data;
             
-            if (hm->resp_code != 200)
-              ESP_LOGE(TAG, "Failed Play action. Code: %d Response: %s.", hm->resp_code, mg_str_string(&hm->resp_status_msg).c_str());
+            if (Warthog::http_status_code(hm) != 200)
+              ESP_LOGE(TAG, "Failed Play action. Code: %d Response: %s.", Warthog::http_status_code(hm), Warthog::http_status_message(hm).c_str());
           };
 
           // Extact the renderer control url from the fn_data pointer
@@ -699,7 +700,7 @@ void UpnpControl::task(void* pvParameters)
           
           // Send play action to renderer
           UPNP::PlayAction play;
-          mg_connect_http(nc->mgr, play_event_handler, nullptr, url->c_str(), play.headers().c_str(), play.body().c_str());
+          Warthog::http_connect_post(nc->mgr, *url, play_event_handler, nullptr, play.headers(), play.body());
 
           // Free the control url
           // TODO we could leak memory if we never get a reply
@@ -731,7 +732,7 @@ void UpnpControl::task(void* pvParameters)
 
           // Construct and send the set URI action
           UPNP::SetAvTransportUriAction setUri(uri);
-          mg_connect_http(&manager, event_handler, url, r.control_url.c_str(), setUri.headers().c_str(), setUri.body().c_str());
+          Warthog::http_connect_post(&manager, r.control_url, event_handler, url, setUri.headers().c_str(), setUri.body().c_str());
         }
 
         xSemaphoreGive(renderer_mutex);
@@ -753,8 +754,8 @@ void UpnpControl::task(void* pvParameters)
           
           struct mg_http_message* hm = (struct mg_http_message*) ev_data;
           
-          if (hm->resp_code != 200)
-            ESP_LOGE(TAG, "Failed Stop action. Code: %d Response: %s.", hm->resp_code, mg_str_string(&hm->resp_status_msg).c_str());
+          if (Warthog::http_status_code(hm) != 200)
+            ESP_LOGE(TAG, "Failed Stop action. Code: %d Response: %s.", Warthog::http_status_code(hm), Warthog::http_status_message(hm).c_str());
         };
 
         xSemaphoreTake(renderer_mutex, portMAX_DELAY);
@@ -777,7 +778,7 @@ void UpnpControl::task(void* pvParameters)
 
           // Send stop action to renderer
           UPNP::StopAction stop;
-          mg_connect_http(&manager, event_handler, nullptr, r.control_url.c_str(), stop.headers().c_str(), stop.body().c_str());
+          Warthog::http_connect_post(&manager, r.control_url, event_handler, nullptr, stop.headers(), stop.body());
         }
 
         xSemaphoreGive(renderer_mutex);
