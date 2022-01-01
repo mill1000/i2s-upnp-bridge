@@ -25,6 +25,20 @@ static SemaphoreHandle_t renderer_mutex;
 
 namespace SSDP
 {
+  static constexpr uint32_t MX = 5;
+
+  // Search target we are looking for
+  static const char* search_target = "urn:schemas-upnp-org:device:MediaRenderer:1";
+
+  // SSDP search request to send
+  static const char* search_request =\
+  "M-SEARCH * HTTP/1.1\r\n"\
+  "HOST: 239.255.255.250:1900\r\n"\
+  "MAN: \"ssdp:discover\"\r\n"\
+  "ST: %s\r\n"\
+  "MX: %d\r\n"\
+  "\r\n";
+
 /**
   @brief  Find a device's icon URL for the largest icon
   
@@ -360,21 +374,6 @@ static void ssdpDescriptionEventHandler(struct mg_connection* nc, int ev, void* 
 */
 static void ssdpDiscoveryEventHandler(struct mg_connection* nc, int ev, void* ev_data, void* fn_data)
 {
-  constexpr uint32_t MG_F_SSDP_SEARCH = MG_F_USER_1;
-  constexpr int32_t SSDP_MX = 5;
-
-  // Search target we are looking for
-  const char* search_target = "urn:schemas-upnp-org:device:MediaRenderer:1";
-
-  // SSDP search request to send
-  const char* ssdp_search_request =\
-  "M-SEARCH * HTTP/1.1\r\n"\
-  "HOST: 239.255.255.250:1900\r\n"\
-  "MAN: \"ssdp:discover\"\r\n"\
-  "ST: %s\r\n"\
-  "MX: %d\r\n"\
-  "\r\n";
-
   switch(ev)
   {
     case MG_EV_HTTP_MSG:
@@ -393,7 +392,7 @@ static void ssdpDiscoveryEventHandler(struct mg_connection* nc, int ev, void* ev
       
       // Ignore advertisements not matching our search target
       struct mg_str* NT = mg_http_get_header(hm, "NT");
-      if (mg_vcasecmp(NT, search_target) != 0)
+      if (mg_vcasecmp(NT, SSDP::search_target) != 0)
         return;
 
       // Extract NTS field
@@ -461,8 +460,8 @@ static void ssdpDiscoveryEventHandler(struct mg_connection* nc, int ev, void* ev
         return;
       
       // Ignore data not on the search socket
-      if ((nc->flags & MG_F_SSDP_SEARCH) != MG_F_SSDP_SEARCH)
-        return;
+      // if ((nc->flags & MG_F_SSDP_SEARCH) != MG_F_SSDP_SEARCH)
+      //   return;
 
       struct mg_http_message* hm = (struct mg_http_message *) ev_data;
 
@@ -477,7 +476,7 @@ static void ssdpDiscoveryEventHandler(struct mg_connection* nc, int ev, void* ev
 
       // Ignore responses not matching our search target
       struct mg_str* ST = mg_http_get_header(hm, "ST");
-      if (mg_vcasecmp(ST, search_target) != 0)
+      if (mg_vcasecmp(ST, SSDP::search_target) != 0)
       {
         ESP_LOGW(TAG, "Ignoring non-matching ST: %s", mg_str_string(ST).c_str());
         return;
@@ -519,44 +518,52 @@ static void ssdpDiscoveryEventHandler(struct mg_connection* nc, int ev, void* ev
       break;
     }
     
-    case MG_EV_TIMER:
-    {
-      if (nc->flags & MG_F_SSDP_SEARCH)
-      {
-        // Close the search connection
-        ESP_LOGI(TAG, "Search completed.");
-        nc->is_draining = true;
-        return;
-      }
-
-      // Restart timer to search again
-      mg_set_timer(nc, mg_time() + 360);
-
-      ESP_LOGI(TAG, "Sending M-SEARCH.");
-
-      // Create a outbound UDP socket
-      struct mg_connection* search = mg_http_connect(nc->mgr, "udp://239.255.255.250:1900", ssdpDiscoveryEventHandler, nullptr);
-
-      // Adjust the Multicast TTL of outbound socket to UPnP 1.0 spec
-      uint8_t ttl = 4;
-      setsockopt((int)search->fd , IPPROTO_IP, IP_MULTICAST_TTL, &ttl, sizeof(ttl));
-      
-      // Mark this connection as for searching
-      search->flags |= MG_F_SSDP_SEARCH;
-
-      // Send a burst of search requests
-      for (uint8_t i = 0; i < 3; i++)
-        mg_printf(search, ssdp_search_request, search_target, SSDP_MX);
-
-      // Stop search after 5 seconds
-      mg_set_timer(search, mg_time() + SSDP_MX);
-
-      break;
-    }
-
     default:
       break;
   }
+}
+
+/**
+  @brief  Warthog timer event handler for SSDP search connections
+  
+  @param  timer Warthog timer that triggered
+  @param  fn_data Function data pointer
+  @retval none
+*/
+static void ssdpSearchTimerHandler(Warthog::Timer* timer, void* fn_data)
+{
+  ESP_LOGI(TAG, "Sending M-SEARCH.");
+
+  // Get manager from the function data
+  struct mg_mgr* mgr = (struct mg_mgr*) fn_data;
+
+  // Ensure search executes every 5 minutes
+  timer->mg_timer.period_ms = 360 * 1000;
+
+  // Create a outbound UDP socket
+  struct mg_connection* search = mg_http_connect(mgr, "udp://239.255.255.250:1900", ssdpDiscoveryEventHandler, nullptr);
+
+  // Adjust the Multicast TTL of outbound socket to UPnP 1.0 spec
+  uint8_t ttl = 4;
+  setsockopt((int)search->fd, IPPROTO_IP, IP_MULTICAST_TTL, &ttl, sizeof(ttl));
+
+  // Send a burst of search requests
+  for (uint8_t i = 0; i < 3; i++)
+    mg_printf(search, SSDP::search_request, SSDP::search_target, SSDP::MX);
+
+  // Stop search after appropriate time
+  Warthog::Timer* search_timeout = new Warthog::Timer();
+  search_timeout->init(10*1000, 0, [](Warthog::Timer* timer, void* fn_data)
+  {
+    ESP_LOGI(TAG, "Search completed.");
+
+    // Close search connection
+    struct mg_connection* c = (struct mg_connection*) fn_data;
+    c->is_draining = true;
+    
+    // Free the timer
+    delete timer;
+  }, search);
 }
 
 /**
@@ -595,7 +602,8 @@ void UpnpControl::task(void* pvParameters)
   }
 
   // Start search shortly
-  mg_set_timer(ssdp, mg_time() + 5.0);
+  Warthog::Timer search_timer;
+  search_timer.init(5000, MG_TIMER_REPEAT, ssdpSearchTimerHandler, &manager);
 
   // Join the SSDP multcast group
   ip4_addr_t addr = { .addr = IPADDR_ANY };
