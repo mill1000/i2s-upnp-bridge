@@ -12,3 +12,7 @@
 	path = components/nlohmann-json/json
 	url = https://github.com/nlohmann/json.git
 	branch = v3.9.1
+	
+[submodule "components/warthog/warthog"]
+	path = components/warthog/warthog
+	url = https://github.com/mill1000/warthog.git
