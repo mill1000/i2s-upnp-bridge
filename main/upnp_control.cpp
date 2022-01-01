@@ -312,20 +312,20 @@ static inline std::string mg_str_string(const mg_str* s)
 /**
   @brief  Mongoose event handler for SSDP description events
   
-  @param  nc Mongoose connection
+  @param  c Mongoose connection
   @param  ev Mongoose event calling the function
   @param  ev_data Event data pointer
   @param  fn_data Function data pointer
   @retval none
 */
-static void ssdpDescriptionEventHandler(struct mg_connection* nc, int ev, void* ev_data, void* fn_data)
+static void ssdpDescriptionEventHandler(struct mg_connection* c, int ev, void* ev_data, void* fn_data)
 {
   switch(ev)
   {
     case MG_EV_HTTP_MSG:
     {
       char addr[32];
-      mg_straddr(nc, addr, sizeof(addr));
+      mg_straddr(c, addr, sizeof(addr));
       std::string host = std::string(addr);
 
       struct mg_http_message* hm = (struct mg_http_message*) ev_data;
@@ -366,20 +366,20 @@ static void ssdpDescriptionEventHandler(struct mg_connection* nc, int ev, void* 
 /**
   @brief  Mongoose event handler for SSDP discovery events
   
-  @param  nc Mongoose connection
+  @param  c Mongoose connection
   @param  ev Mongoose event calling the function
   @param  ev_data Event data pointer
   @param  fn_data Function data pointer
   @retval none
 */
-static void ssdpDiscoveryEventHandler(struct mg_connection* nc, int ev, void* ev_data, void* fn_data)
+static void ssdpDiscoveryEventHandler(struct mg_connection* c, int ev, void* ev_data, void* fn_data)
 {
   switch(ev)
   {
     case MG_EV_HTTP_MSG:
     {
       // Only process UDP data
-      if (nc->is_udp == false)
+      if (c->is_udp == false)
         return;
 
       struct mg_http_message* hm = (struct mg_http_message *) ev_data;
@@ -443,7 +443,7 @@ static void ssdpDiscoveryEventHandler(struct mg_connection* nc, int ev, void* ev
       }
 
       // Fetch description xml
-      Warthog::http_connect_get(nc->mgr, location.c_str(), ssdpDescriptionEventHandler);
+      Warthog::http_connect_get(c->mgr, location.c_str(), ssdpDescriptionEventHandler);
 
       break;
     }
@@ -456,11 +456,11 @@ static void ssdpDiscoveryEventHandler(struct mg_connection* nc, int ev, void* ev
       // response header is enough for us
 
       // Only process UDP data
-      if (nc->is_udp == false)
+      if (c->is_udp == false)
         return;
       
       // Ignore data not on the search socket
-      // if ((nc->flags & MG_F_SSDP_SEARCH) != MG_F_SSDP_SEARCH)
+      // if ((c->flags & MG_F_SSDP_SEARCH) != MG_F_SSDP_SEARCH)
       //   return;
 
       struct mg_http_message* hm = (struct mg_http_message *) ev_data;
@@ -513,7 +513,7 @@ static void ssdpDiscoveryEventHandler(struct mg_connection* nc, int ev, void* ev
       }
 
       // Fetch description xml
-      Warthog::http_connect_get(nc->mgr, location.c_str(), ssdpDescriptionEventHandler);
+      Warthog::http_connect_get(c->mgr, location.c_str(), ssdpDescriptionEventHandler);
 
       break;
     }
@@ -677,7 +677,7 @@ void UpnpControl::task(void* pvParameters)
         std::string uri = "http://" + std::string(esp_ip4addr_ntoa(&info.ip, buffer, sizeof(buffer))) + "/stream.wav";
 
         // Mongoose handler to chain a Play action on success
-        auto event_handler = [](struct mg_connection* nc, int ev, void* ev_data, void* fn_data)
+        auto event_handler = [](struct mg_connection* c, int ev, void* ev_data, void* fn_data)
         {
           if (ev != MG_EV_HTTP_MSG)
             return;
@@ -692,7 +692,7 @@ void UpnpControl::task(void* pvParameters)
           }
 
           // Mongoose handler for play action
-          auto play_event_handler = [](struct mg_connection* nc, int ev, void* ev_data, void* fn_data)
+          auto play_event_handler = [](struct mg_connection* c, int ev, void* ev_data, void* fn_data)
           {
             if (ev != MG_EV_HTTP_MSG)
               return;
@@ -708,7 +708,7 @@ void UpnpControl::task(void* pvParameters)
           
           // Send play action to renderer
           UPNP::PlayAction play;
-          Warthog::http_connect_post(nc->mgr, *url, play_event_handler, nullptr, play.headers(), play.body());
+          Warthog::http_connect_post(c->mgr, *url, play_event_handler, nullptr, play.headers(), play.body());
 
           // Free the control url
           // TODO we could leak memory if we never get a reply
@@ -755,7 +755,7 @@ void UpnpControl::task(void* pvParameters)
         // Stop playback on selected renderers
         
         // Mongoose handler. Yay lambdas
-        auto event_handler = [](struct mg_connection* nc, int ev, void* ev_data, void* fn_data)
+        auto event_handler = [](struct mg_connection* c, int ev, void* ev_data, void* fn_data)
         {
           if (ev != MG_EV_HTTP_MSG)
             return;

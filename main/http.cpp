@@ -23,27 +23,27 @@ static SemaphoreHandle_t client_mutex;
 /**
   @brief  Mongoose event handler to stream audio data to clients
   
-  @param  nc Mongoose connection
+  @param  c Mongoose connection
   @param  ev Mongoose event calling the function
   @param  ev_data Event data pointer
   @param  fn_data Function data pointer
   @retval none
 */
-static void httpStreamEventHandler(struct mg_connection* nc, int ev, void* ev_data, void* fn_data)
+static void httpStreamEventHandler(struct mg_connection* c, int ev, void* ev_data, void* fn_data)
 {
   switch(ev)
   {
     case MG_EV_HTTP_MSG:
     {
       char addr[32];
-      mg_straddr(nc, addr, sizeof(addr));
+      mg_straddr(c, addr, sizeof(addr));
 
       // Lock the client list
       xSemaphoreTake(client_mutex, portMAX_DELAY);
 
-      if (clients.count(nc))
+      if (clients.count(c))
       {
-        ESP_LOGW(TAG, "Client %p (%s) already exists.", nc, addr);
+        ESP_LOGW(TAG, "Client %p (%s) already exists.", c, addr);
         xSemaphoreGive(client_mutex);
         return;
       }
@@ -52,13 +52,13 @@ static void httpStreamEventHandler(struct mg_connection* nc, int ev, void* ev_da
       QueueHandle_t queue = xQueueCreate(HTTP::CLIENT_QUEUE_LENGTH, sizeof(I2S::sample_buffer_t));
       if (queue == nullptr)
       {
-        ESP_LOGE(TAG, "Failed to create queue for client %p (%s).", nc, addr);
+        ESP_LOGE(TAG, "Failed to create queue for client %p (%s).", c, addr);
         xSemaphoreGive(client_mutex);
         return;
       }
 
-      nc->fn_data = queue;
-      clients.insert(nc);
+      c->fn_data = queue;
+      clients.insert(c);
 
       // Notify system of first client
       if (clients.size() == 1)
@@ -70,17 +70,17 @@ static void httpStreamEventHandler(struct mg_connection* nc, int ev, void* ev_da
       HTTP::StreamConfig* stream_config = (HTTP::StreamConfig*) fn_data;
       assert(stream_config != nullptr);
 
-      ESP_LOGI(TAG, "New %s client %p (%s).", stream_config->name, nc, addr);
+      ESP_LOGI(TAG, "New %s client %p (%s).", stream_config->name, c, addr);
 
       // Send the HTTP header
-      mg_http_reply(nc, 200, stream_config->headers, "");
+      mg_http_reply(c, 200, stream_config->headers, "");
 
       // Perform additional setup if needed
       if (stream_config->setup)
-        stream_config->setup(nc);
+        stream_config->setup(c);
 
       // Reassign event handler for this client
-      nc->fn = httpStreamEventHandler;
+      c->fn = httpStreamEventHandler;
 
       break;
     }
@@ -91,12 +91,12 @@ static void httpStreamEventHandler(struct mg_connection* nc, int ev, void* ev_da
       // Service queues on every poll or send event
 
       // Get queue handle from the connection
-      QueueHandle_t queue = (QueueHandle_t) nc->fn_data;
+      QueueHandle_t queue = (QueueHandle_t) c->fn_data;
       assert(queue != nullptr);
   
       I2S::sample_buffer_t samples;
       while (xQueueReceive(queue, samples.data(), 0) == pdTRUE)
-        mg_send(nc, samples.data(), sizeof(samples));
+        mg_send(c, samples.data(), sizeof(samples));
 
       break;
     }
@@ -104,18 +104,18 @@ static void httpStreamEventHandler(struct mg_connection* nc, int ev, void* ev_da
     case MG_EV_CLOSE:
     {
       char addr[32];
-      mg_straddr(nc, addr, sizeof(addr));
-      ESP_LOGI(TAG, "Client %p (%s) disconnected.", nc, addr);
+      mg_straddr(c, addr, sizeof(addr));
+      ESP_LOGI(TAG, "Client %p (%s) disconnected.", c, addr);
 
       // Delete the clients queue
-      if (nc->fn_data != nullptr)
-        vQueueDelete((QueueHandle_t) nc->fn_data);
+      if (c->fn_data != nullptr)
+        vQueueDelete((QueueHandle_t) c->fn_data);
       else
-        ESP_LOGE(TAG, "No queue for client %p (%s).", nc, addr);
+        ESP_LOGE(TAG, "No queue for client %p (%s).", c, addr);
 
       // Remove the client
       xSemaphoreTake(client_mutex, portMAX_DELAY);
-      clients.erase(nc);
+      clients.erase(c);
       
       // Notify system of last client
       if (clients.empty())
@@ -134,13 +134,13 @@ static void httpStreamEventHandler(struct mg_connection* nc, int ev, void* ev_da
 /**
   @brief  Generic Mongoose event handler for the HTTP server
   
-  @param  nc Mongoose connection
+  @param  c Mongoose connection
   @param  ev Mongoose event calling the function
   @param  ev_data Event data pointer
   @param  fn_data Function data pointer
   @retval none
 */
-static void httpEventHandler(struct mg_connection* nc, int ev, void* ev_data, void* fn_data)
+static void httpEventHandler(struct mg_connection* c, int ev, void* ev_data, void* fn_data)
 {
   extern const char index_html[] asm("_binary_index_html_start");
 
@@ -154,8 +154,8 @@ static void httpEventHandler(struct mg_connection* nc, int ev, void* ev_data, vo
       if (mg_http_get_var(&hm->query, "action", action, sizeof(action)) == -1)
       {
         // Serve the page
-        mg_http_reply(nc, 200, "Content-Type: text/html\r\n", index_html);
-        nc->is_draining = true;
+        mg_http_reply(c, 200, "Content-Type: text/html\r\n", index_html);
+        c->is_draining = true;
         break;
       }
       else if (strcmp(action, "get") == 0) // Get JSON values
@@ -164,8 +164,8 @@ static void httpEventHandler(struct mg_connection* nc, int ev, void* ev_data, vo
 
         ESP_LOGI(TAG, "Get = %s", renderers.c_str());
 
-        mg_http_reply(nc, 200, "Content-Type: application/json\r\n", renderers.c_str());
-        nc->is_draining = true;
+        mg_http_reply(c, 200, "Content-Type: application/json\r\n", renderers.c_str());
+        c->is_draining = true;
     
         break;
       }
@@ -180,13 +180,13 @@ static void httpEventHandler(struct mg_connection* nc, int ev, void* ev_data, vo
 
         const char* error_string = success ? "Update successful." : "JSON parse failed.";
         
-        mg_http_reply(nc, success ? 200 : 400, "Content-Type: text/html\r\n", error_string);
-        nc->is_draining = true;
+        mg_http_reply(c, success ? 200 : 400, "Content-Type: text/html\r\n", error_string);
+        c->is_draining = true;
       }
       else
       {
-        Warthog::http_send_redirect(nc, 302, "/");
-        nc->is_draining = true;
+        Warthog::http_send_redirect(c, 302, "/");
+        c->is_draining = true;
       }
       break;
     }
@@ -199,13 +199,13 @@ static void httpEventHandler(struct mg_connection* nc, int ev, void* ev_data, vo
 /**
   @brief  Mongoose event handler for the OTA firmware update
   
-  @param  nc Mongoose connection
+  @param  c Mongoose connection
   @param  ev Mongoose event calling the function
   @param  ev_data Event data pointer
   @param  fn_data Function data pointer
   @retval none
 */
-// static void otaEventHandler(struct mg_connection* nc, int ev, void* ev_data, void* fn_data)
+// static void otaEventHandler(struct mg_connection* c, int ev, void* ev_data, void* fn_data)
 // {
 //   extern const uint8_t ota_html[] asm("_binary_ota_html_start");
 //   extern const uint8_t ota_html_end[] asm("_binary_ota_html_end");
@@ -222,11 +222,11 @@ static void httpEventHandler(struct mg_connection* nc, int ev, void* ev_data, vo
 //     case MG_EV_HTTP_MSG:
 //     {
 //       // Send the header
-//       mg_send_head(nc, 200, ota_html_len, "Content-Type: text/html");
+//       mg_send_head(c, 200, ota_html_len, "Content-Type: text/html");
 
 //       // Serve the page
-//       mg_send(nc, ota_html, ota_html_len);
-//       nc->is_draining= true;
+//       mg_send(c, ota_html, ota_html_len);
+//       c->is_draining= true;
 //       break;
 //     }
 
@@ -247,7 +247,7 @@ static void httpEventHandler(struct mg_connection* nc, int ev, void* ev_data, vo
 
 //         // Mark OTA as failed and append reason
 //         response += "OTA update already in progress.";
-//         nc->flags |= MG_F_OTA_FAILED;
+//         c->flags |= MG_F_OTA_FAILED;
 //         return;
 //       }
 
@@ -259,7 +259,7 @@ static void httpEventHandler(struct mg_connection* nc, int ev, void* ev_data, vo
 
 //         // Mark OTA as failed and append reason
 //         response += "OTA update init failed.";
-//         nc->flags |= MG_F_OTA_FAILED;
+//         c->flags |= MG_F_OTA_FAILED;
 //         return;
 //       }
 
@@ -271,7 +271,7 @@ static void httpEventHandler(struct mg_connection* nc, int ev, void* ev_data, vo
 
 //         // Mark OTA as failed and append reason
 //         response += "OTA update init failed.";
-//         nc->flags |= MG_F_OTA_FAILED;
+//         c->flags |= MG_F_OTA_FAILED;
 
 //         // Kill the handle
 //         delete ota;
@@ -289,7 +289,7 @@ static void httpEventHandler(struct mg_connection* nc, int ev, void* ev_data, vo
 //       struct mg_http_multipart_part* multipart = (struct mg_http_multipart_part*) ev_data;
 
 //       // Something went wrong so ignore the data
-//       if (nc->flags & MG_F_OTA_FAILED)
+//       if (c->flags & MG_F_OTA_FAILED)
 //         return;
 
 //       // Fetch handle from fn_data
@@ -301,7 +301,7 @@ static void httpEventHandler(struct mg_connection* nc, int ev, void* ev_data, vo
 //       {
 //         // Mark OTA as failed and append reason
 //         response += "OTA write failed.";
-//         nc->flags |= MG_F_OTA_FAILED;
+//         c->flags |= MG_F_OTA_FAILED;
 //       }
 //       break;
 //     }
@@ -327,7 +327,7 @@ static void httpEventHandler(struct mg_connection* nc, int ev, void* ev_data, vo
 //       if (result.status != ESP_OK)
 //       {
 //         response += "OTA end failed.";
-//         nc->flags |= MG_F_OTA_FAILED;
+//         c->flags |= MG_F_OTA_FAILED;
 //       }
 
 //       // Free the handle object and reference
@@ -339,14 +339,14 @@ static void httpEventHandler(struct mg_connection* nc, int ev, void* ev_data, vo
 //     case MG_EV_HTTP_MULTIPART_REQUEST_END:
 //     {
 //       // Send the appropriate reply
-//       const char* reply = nc->flags & MG_F_OTA_FAILED ? response.c_str() : "OTA update successful.";
+//       const char* reply = c->flags & MG_F_OTA_FAILED ? response.c_str() : "OTA update successful.";
       
-//       mg_send_head(nc, nc->flags & MG_F_OTA_FAILED ? 500 : 200, strlen(reply), "Content-Type: text/html");
-//       mg_printf(nc, reply);
-//       nc->is_draining = true;
+//       mg_send_head(c, c->flags & MG_F_OTA_FAILED ? 500 : 200, strlen(reply), "Content-Type: text/html");
+//       mg_printf(c, reply);
+//       c->is_draining = true;
 
 //       // Signal OTA is complete
-//       nc->flags |= MG_F_OTA_COMPLETE;
+//       c->flags |= MG_F_OTA_COMPLETE;
 
 //       response.clear();
 //       break;
@@ -355,7 +355,7 @@ static void httpEventHandler(struct mg_connection* nc, int ev, void* ev_data, vo
 //     case MG_EV_CLOSE:
 //     {
 //       // Ignore close events that aren't after an OTA
-//       if ((nc->flags & MG_F_OTA_COMPLETE) != MG_F_OTA_COMPLETE)
+//       if ((c->flags & MG_F_OTA_COMPLETE) != MG_F_OTA_COMPLETE)
 //        return;
       
 //       // Fire callbacks once OTA connection has closed
@@ -415,11 +415,11 @@ void HTTP::task(void* pvParameters)
 
   // Construct the WAV stream object
   StreamConfig wav("WAV", "Content-Type: audio/wav\r\nAccept-Ranges: none\r\nCache-Control: no-cache,no-store,must-revalidate,max-age=0\r\n");
-  wav.setup = [](struct mg_connection* nc)
+  wav.setup = [](struct mg_connection* c)
   {
     // Construct and send the WAV header
     WAV::Header wav_header(48000);
-    mg_send(nc, &wav_header, sizeof(wav_header));
+    mg_send(c, &wav_header, sizeof(wav_header));
   };
 
   // Add separate end points for raw PCM and WAV stream
@@ -451,17 +451,17 @@ void HTTP::queue_samples(const I2S::sample_buffer_t& samples)
     return;
   }
 
-  for (const auto nc : clients)
+  for (const auto c : clients)
   {
     // Get queue handle from the connection
-    QueueHandle_t queue = (QueueHandle_t) nc->fn_data;
+    QueueHandle_t queue = (QueueHandle_t) c->fn_data;
     assert(queue != nullptr);
 
     // Attempt to queue the sample data
     if (xQueueSendToBack(queue, samples.data(), pdMS_TO_TICKS(50)) == pdTRUE)
       continue;
     
-    ESP_LOGW(TAG, "Client %p queue overflow.", nc);
+    ESP_LOGW(TAG, "Client %p queue overflow.", c);
 
     // Free up space in the queue
     I2S::sample_buffer_t dummy;
@@ -470,7 +470,7 @@ void HTTP::queue_samples(const I2S::sample_buffer_t& samples)
 
     // Queue without blocking this time
     if (xQueueSendToBack(queue, samples.data(), 0) != pdTRUE)
-      ESP_LOGE(TAG, "Failed to queue samples for %p.", nc);
+      ESP_LOGE(TAG, "Failed to queue samples for %p.", c);
   }
 
   xSemaphoreGive(client_mutex);
