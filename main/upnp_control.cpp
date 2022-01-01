@@ -538,7 +538,7 @@ static void ssdpDiscoveryEventHandler(struct mg_connection* nc, int ev, void* ev
 
       // Adjust the Multicast TTL of outbound socket to UPnP 1.0 spec
       uint8_t ttl = 4;
-      setsockopt(search->fd, IPPROTO_IP, IP_MULTICAST_TTL, &ttl, sizeof(ttl));
+      setsockopt((int)search->fd , IPPROTO_IP, IP_MULTICAST_TTL, &ttl, sizeof(ttl));
       
       // Mark this connection as for searching
       search->flags |= MG_F_SSDP_SEARCH;
