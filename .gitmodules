@@ -1,7 +1,7 @@
 [submodule "components/mongoose/mongoose"]
 	path = components/mongoose/mongoose
 	url = https://github.com/cesanta/mongoose.git
-	branch = 7.4
+	branch = 7.5
 
 [submodule "components/tinyxml2/tinyxml2"]
 	path = components/tinyxml2/tinyxml2
