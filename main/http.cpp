@@ -10,6 +10,7 @@
 #include "i2s_interface.h"
 #include "json.h"
 #include "mongoose.h"
+#include "warthog.h"
 #include "ota_interface.h"
 #include "system.h"
 #include "wav.h"
@@ -389,12 +390,15 @@ void HTTP::task(void* pvParameters)
     return;
   }
 
+  Warthog warthog;
+  warthog.register_default(httpEventHandler);
+
   // Create and init the event manager
   struct mg_mgr manager;
   mg_mgr_init(&manager);
 
   // Connect bind to an address and specify the event handler
-  struct mg_connection* connection = mg_http_listen(&manager, "0.0.0.0:80", httpEventHandler, nullptr);
+  struct mg_connection* connection = mg_http_listen(&manager, "0.0.0.0:80", Warthog::mongoose_event_handler, nullptr);
   if (connection == NULL)
   {
     ESP_LOGE(TAG, "Failed to bind port.");
@@ -406,21 +410,21 @@ void HTTP::task(void* pvParameters)
   // Special handler for OTA page
   // mg_register_http_endpoint(connection, "/ota", otaEventHandler, nullptr);
 
-  // // Construct the PCM stream object
-  // StreamConfig pcm("PCM", "Content-Type: audio/L16;rate=48000;channels=2\r\nAccept-Ranges: none\r\nCache-Control: no-cache,no-store,must-revalidate,max-age=0\r\n");
+  // Construct the PCM stream object
+  StreamConfig pcm("PCM", "Content-Type: audio/L16;rate=48000;channels=2\r\nAccept-Ranges: none\r\nCache-Control: no-cache,no-store,must-revalidate,max-age=0\r\n");
 
-  // // Construct the WAV stream object
-  // StreamConfig wav("WAV", "Content-Type: audio/wav\r\nAccept-Ranges: none\r\nCache-Control: no-cache,no-store,must-revalidate,max-age=0\r\n");
-  // wav.setup = [](struct mg_connection* nc)
-  // {
-  //   // Construct and send the WAV header
-  //   WAV::Header wav_header(48000);
-  //   mg_send(nc, &wav_header, sizeof(wav_header));
-  // };
+  // Construct the WAV stream object
+  StreamConfig wav("WAV", "Content-Type: audio/wav\r\nAccept-Ranges: none\r\nCache-Control: no-cache,no-store,must-revalidate,max-age=0\r\n");
+  wav.setup = [](struct mg_connection* nc)
+  {
+    // Construct and send the WAV header
+    WAV::Header wav_header(48000);
+    mg_send(nc, &wav_header, sizeof(wav_header));
+  };
 
   // Add separate end points for raw PCM and WAV stream
-  // mg_register_http_endpoint(connection, "/stream.pcm", httpStreamEventHandler, &pcm);
-  // mg_register_http_endpoint(connection, "/stream.wav", httpStreamEventHandler, &wav);
+  warthog.register_endpoint("/stream.pcm", httpStreamEventHandler, &pcm);
+  warthog.register_endpoint("/stream.wav", httpStreamEventHandler, &wav);
 
   // Loop waiting for events
   while(1)
