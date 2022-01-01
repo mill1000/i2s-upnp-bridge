@@ -185,7 +185,7 @@ static void httpEventHandler(struct mg_connection* nc, int ev, void* ev_data, vo
       }
       else
       {
-        mg_http_reply(nc, 302, "Location: /\r\n", "");
+        Warthog::http_send_redirect(nc, 302, "/");
         nc->is_draining = true;
       }
       break;
