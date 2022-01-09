@@ -458,10 +458,6 @@ static void ssdpDiscoveryEventHandler(struct mg_connection* c, int ev, void* ev_
       // Only process UDP data
       if (c->is_udp == false)
         return;
-      
-      // Ignore data not on the search socket
-      // if ((c->flags & MG_F_SSDP_SEARCH) != MG_F_SSDP_SEARCH)
-      //   return;
 
       struct mg_http_message* hm = (struct mg_http_message *) ev_data;
 
