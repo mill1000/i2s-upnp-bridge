@@ -13,6 +13,7 @@
 #include "upnp.h"
 #include "upnp_renderer.h"
 #include "mongoose.h"
+#include "warthog.h"
 #include "nvs_interface.h"
 #include "tinyxml2.h"
 
@@ -24,6 +25,20 @@ static SemaphoreHandle_t renderer_mutex;
 
 namespace SSDP
 {
+  static constexpr uint32_t MX = 5;
+
+  // Search target we are looking for
+  static const char* search_target = "urn:schemas-upnp-org:device:MediaRenderer:1";
+
+  // SSDP search request to send
+  static const char* search_request =\
+  "M-SEARCH * HTTP/1.1\r\n"\
+  "HOST: 239.255.255.250:1900\r\n"\
+  "MAN: \"ssdp:discover\"\r\n"\
+  "ST: %s\r\n"\
+  "MX: %d\r\n"\
+  "\r\n";
+
 /**
   @brief  Find a device's icon URL for the largest icon
   
@@ -291,30 +306,30 @@ UPNP::Renderer parse_description(const std::string& host, const std::string& des
 */
 static inline std::string mg_str_string(const mg_str* s)
 {
-  return (s == nullptr) ? std::string() : std::string(s->p, s->len);
+  return (s == nullptr) ? std::string() : std::string(s->ptr, s->len);
 }
 
 /**
   @brief  Mongoose event handler for SSDP description events
   
-  @param  nc Mongoose connection
+  @param  c Mongoose connection
   @param  ev Mongoose event calling the function
   @param  ev_data Event data pointer
-  @param  user_data User data pointer
+  @param  fn_data Function data pointer
   @retval none
 */
-static void ssdpDescriptionEventHandler(struct mg_connection* nc, int ev, void* ev_data, void* user_data)
+static void ssdpDescriptionEventHandler(struct mg_connection* c, int ev, void* ev_data, void* fn_data)
 {
   switch(ev)
   {
-    case MG_EV_HTTP_REPLY:
+    case MG_EV_HTTP_MSG:
     {
       char addr[32];
-      mg_sock_addr_to_str(&nc->sa, addr, sizeof(addr), MG_SOCK_STRINGIFY_IP | MG_SOCK_STRINGIFY_PORT);
+      mg_straddr(&c->peer, addr, sizeof(addr));
       std::string host = std::string(addr);
 
-      struct http_message* hm = (struct http_message*) ev_data;
-      const std::string description = std::string(hm->body.p, hm->body.len);
+      struct mg_http_message* hm = (struct mg_http_message*) ev_data;
+      const std::string description = std::string(hm->body.ptr, hm->body.len);
 
       ESP_LOGD(TAG, "Description from %s: %s", host.c_str(), description.c_str());
 
@@ -351,38 +366,23 @@ static void ssdpDescriptionEventHandler(struct mg_connection* nc, int ev, void* 
 /**
   @brief  Mongoose event handler for SSDP discovery events
   
-  @param  nc Mongoose connection
+  @param  c Mongoose connection
   @param  ev Mongoose event calling the function
   @param  ev_data Event data pointer
-  @param  user_data User data pointer
+  @param  fn_data Function data pointer
   @retval none
 */
-static void ssdpDiscoveryEventHandler(struct mg_connection* nc, int ev, void* ev_data, void* user_data)
+static void ssdpDiscoveryEventHandler(struct mg_connection* c, int ev, void* ev_data, void* fn_data)
 {
-  constexpr uint32_t MG_F_SSDP_SEARCH = MG_F_USER_1;
-  constexpr int32_t SSDP_MX = 5;
-
-  // Search target we are looking for
-  const char* search_target = "urn:schemas-upnp-org:device:MediaRenderer:1";
-
-  // SSDP search request to send
-  const char* ssdp_search_request =\
-  "M-SEARCH * HTTP/1.1\r\n"\
-  "HOST: 239.255.255.250:1900\r\n"\
-  "MAN: \"ssdp:discover\"\r\n"\
-  "ST: %s\r\n"\
-  "MX: %d\r\n"\
-  "\r\n";
-
   switch(ev)
   {
-    case MG_EV_HTTP_REQUEST:
+    case MG_EV_HTTP_MSG:
     {
       // Only process UDP data
-      if ((nc->flags & MG_F_UDP) != MG_F_UDP)
+      if (c->is_udp == false)
         return;
 
-      struct http_message* hm = (struct http_message *) ev_data;
+      struct mg_http_message* hm = (struct mg_http_message *) ev_data;
       
       ESP_LOGD(TAG, "SSDP/HTTP Request: %s", mg_str_string(&hm->message).c_str());
 
@@ -391,12 +391,12 @@ static void ssdpDiscoveryEventHandler(struct mg_connection* nc, int ev, void* ev
         return;
       
       // Ignore advertisements not matching our search target
-      struct mg_str* NT = mg_get_http_header(hm, "NT");
-      if (mg_vcasecmp(NT, search_target) != 0)
+      struct mg_str* NT = mg_http_get_header(hm, "NT");
+      if (mg_vcasecmp(NT, SSDP::search_target) != 0)
         return;
 
       // Extract NTS field
-      struct mg_str* NTS = mg_get_http_header(hm, "NTS");
+      struct mg_str* NTS = mg_http_get_header(hm, "NTS");
 
       // Device is terminating services
       if (mg_vcasecmp(NTS, "ssdp:byebye") == 0)
@@ -413,14 +413,14 @@ static void ssdpDiscoveryEventHandler(struct mg_connection* nc, int ev, void* ev
       }
 
       // Attempt to fetch the interesting fields
-      std::string location = mg_str_string(mg_get_http_header(hm, "LOCATION"));
+      std::string location = mg_str_string(mg_http_get_header(hm, "LOCATION"));
       if (location.empty())
       {
         ESP_LOGE(TAG, "No LOCATION in SSDP NOTIFY.");
         return;
       }
 
-      std::string cache_control = mg_str_string(mg_get_http_header(hm, "CACHE-CONTROL"));
+      std::string cache_control = mg_str_string(mg_http_get_header(hm, "CACHE-CONTROL"));
       if (cache_control.empty())
       {
         ESP_LOGE(TAG, "No CACHE-CONTROL in SSDP NOTIFY.");
@@ -443,7 +443,7 @@ static void ssdpDiscoveryEventHandler(struct mg_connection* nc, int ev, void* ev
       }
 
       // Fetch description xml
-      mg_connect_http(nc->mgr, ssdpDescriptionEventHandler, nullptr, location.c_str(), nullptr, nullptr);
+      Warthog::http_connect_get(c->mgr, location.c_str(), ssdpDescriptionEventHandler);
 
       break;
     }
@@ -456,44 +456,48 @@ static void ssdpDiscoveryEventHandler(struct mg_connection* nc, int ev, void* ev
       // response header is enough for us
 
       // Only process UDP data
-      if ((nc->flags & MG_F_UDP) != MG_F_UDP)
-        return;
-      
-      // Ignore data not on the search socket
-      if ((nc->flags & MG_F_SSDP_SEARCH) != MG_F_SSDP_SEARCH)
+      if (c->is_udp == false)
         return;
 
-      struct http_message* hm = (struct http_message *) ev_data;
+      struct mg_http_message* hm = (struct mg_http_message *) ev_data;
 
-      ESP_LOGD(TAG, "SSDP/HTTP Response: %s", std::string(hm->message.p, hm->body.p).c_str());
+      ESP_LOGD(TAG, "SSDP/HTTP Response: %s", std::string(hm->message.ptr, hm->body.ptr).c_str());
       
       // Ignore bad responses
-      if (hm->resp_code != 200)
+      if (Warthog::http_status_code(hm) != 200)
       {
-        ESP_LOGE(TAG, "Invalid SSDP search response: %s", mg_str_string(&hm->resp_status_msg).c_str());
+        ESP_LOGE(TAG, "Invalid SSDP search response: %s", Warthog::http_status_message(hm).c_str());
+        // Free the chunk
+        mg_iobuf_del(&c->recv, 0, hm->message.len);
         return;
       }
 
       // Ignore responses not matching our search target
-      struct mg_str* ST = mg_get_http_header(hm, "ST");
-      if (mg_vcasecmp(ST, search_target) != 0)
+      struct mg_str* ST = mg_http_get_header(hm, "ST");
+      if (mg_vcasecmp(ST, SSDP::search_target) != 0)
       {
         ESP_LOGW(TAG, "Ignoring non-matching ST: %s", mg_str_string(ST).c_str());
+        // Free the chunk
+        mg_iobuf_del(&c->recv, 0, hm->message.len);
         return;
       }
 
       // Attempt to fetch the interesting fields
-      std::string location = mg_str_string(mg_get_http_header(hm, "LOCATION"));
+      std::string location = mg_str_string(mg_http_get_header(hm, "LOCATION"));
       if (location.empty())
       {
         ESP_LOGE(TAG, "No LOCATION in SSDP search response.");
+        // Free the chunk
+        mg_iobuf_del(&c->recv, 0, hm->message.len);
         return;
       }
 
-      std::string cache_control = mg_str_string(mg_get_http_header(hm, "CACHE-CONTROL"));
+      std::string cache_control = mg_str_string(mg_http_get_header(hm, "CACHE-CONTROL"));
       if (cache_control.empty())
       {
         ESP_LOGE(TAG, "No CACHE-CONTROL in SSDP search response.");
+        // Free the chunk
+        mg_iobuf_del(&c->recv, 0, hm->message.len);
         return;
       }
 
@@ -502,61 +506,75 @@ static void ssdpDiscoveryEventHandler(struct mg_connection* nc, int ev, void* ev
       if (sscanf(cache_control.c_str(), "max-age = %d", &max_age) != 1)
       {
         ESP_LOGE(TAG, "Could not extract max-age from SSDP CACHE-CONTROL: %s", cache_control.c_str());
+        // Free the chunk
+        mg_iobuf_del(&c->recv, 0, hm->message.len);
         return;
       }
 
       if (location.empty() || max_age == 0)
       {
         // Unable to find required fields in response
-        ESP_LOGE(TAG, "SSDP response missing required fields. Response: %s", std::string(hm->message.p, hm->body.p).c_str());
+        ESP_LOGE(TAG, "SSDP response missing required fields. Response: %s", std::string(hm->message.ptr, hm->body.ptr).c_str());
+        // Free the chunk
+        mg_iobuf_del(&c->recv, 0, hm->message.len);
         return;
       }
 
       // Fetch description xml
-      mg_connect_http(nc->mgr, ssdpDescriptionEventHandler, nullptr, location.c_str(), nullptr, nullptr);
+      Warthog::http_connect_get(c->mgr, location.c_str(), ssdpDescriptionEventHandler);
+
+      // Free the chunk
+      mg_iobuf_del(&c->recv, 0, hm->message.len);
 
       break;
     }
     
-    case MG_EV_TIMER:
-    {
-      if (nc->flags & MG_F_SSDP_SEARCH)
-      {
-        // Close the search connection
-        ESP_LOGI(TAG, "Search completed.");
-        nc->flags |= MG_F_SEND_AND_CLOSE;
-        return;
-      }
-
-      // Restart timer to search again
-      mg_set_timer(nc, mg_time() + 360);
-
-      ESP_LOGI(TAG, "Sending M-SEARCH.");
-
-      // Create a outbound UDP socket
-      struct mg_connection* search = mg_connect(nc->mgr, "udp://239.255.255.250:1900", ssdpDiscoveryEventHandler, nullptr);
-      mg_set_protocol_http_websocket(search);
-
-      // Adjust the Multicast TTL of outbound socket to UPnP 1.0 spec
-      uint8_t ttl = 4;
-      setsockopt(search->sock, IPPROTO_IP, IP_MULTICAST_TTL, &ttl, sizeof(ttl));
-      
-      // Mark this connection as for searching
-      search->flags |= MG_F_SSDP_SEARCH;
-
-      // Send a burst of search requests
-      for (uint8_t i = 0; i < 3; i++)
-        mg_printf(search, ssdp_search_request, search_target, SSDP_MX);
-
-      // Stop search after 5 seconds
-      mg_set_timer(search, mg_time() + SSDP_MX);
-
-      break;
-    }
-
     default:
       break;
   }
+}
+
+/**
+  @brief  Warthog timer event handler for SSDP search connections
+  
+  @param  timer Warthog timer that triggered
+  @param  fn_data Function data pointer
+  @retval none
+*/
+static void ssdpSearchTimerHandler(Warthog::Timer* timer, void* fn_data)
+{
+  ESP_LOGI(TAG, "Sending M-SEARCH.");
+
+  // Get manager from the function data
+  struct mg_mgr* mgr = (struct mg_mgr*) fn_data;
+
+  // Ensure search executes every 5 minutes
+  timer->mg_timer.period_ms = 360 * 1000;
+
+  // Create a outbound UDP socket
+  struct mg_connection* search = mg_http_connect(mgr, "udp://239.255.255.250:1900", ssdpDiscoveryEventHandler, nullptr);
+
+  // Adjust the Multicast TTL of outbound socket to UPnP 1.0 spec
+  uint8_t ttl = 4;
+  setsockopt((int)search->fd, IPPROTO_IP, IP_MULTICAST_TTL, &ttl, sizeof(ttl));
+
+  // Send a burst of search requests
+  for (uint8_t i = 0; i < 3; i++)
+    mg_printf(search, SSDP::search_request, SSDP::search_target, SSDP::MX);
+
+  // Stop search after appropriate time
+  Warthog::Timer* search_timeout = new Warthog::Timer();
+  search_timeout->init(SSDP::MX * 1000, 0, [](Warthog::Timer* timer, void* fn_data)
+  {
+    ESP_LOGI(TAG, "Search completed.");
+
+    // Close search connection
+    struct mg_connection* c = (struct mg_connection*) fn_data;
+    c->is_draining = true;
+    
+    // Free the timer
+    delete timer;
+  }, search);
 }
 
 /**
@@ -582,14 +600,21 @@ void UpnpControl::task(void* pvParameters)
 
   // Create and init a Mongoose manager
   struct mg_mgr manager;
-  mg_mgr_init(&manager, NULL);
+  mg_mgr_init(&manager);
 
   // Bind the SSDP multicast address and port, enable HTTP parsing
-  struct mg_connection* ssdp = mg_bind(&manager, "udp://239.255.255.250:1900", ssdpDiscoveryEventHandler, nullptr);
-  mg_set_protocol_http_websocket(ssdp);
-  
+  struct mg_connection* ssdp = mg_http_listen(&manager, "udp://239.255.255.250:1900", ssdpDiscoveryEventHandler, nullptr);
+  if (ssdp == NULL)
+  {
+    ESP_LOGE(TAG, "Failed to bind SSDP port.");
+    mg_mgr_free(&manager);
+    vTaskDelete(NULL);
+    return;
+  }
+
   // Start search shortly
-  mg_set_timer(ssdp, mg_time() + 5.0);
+  Warthog::Timer search_timer;
+  search_timer.init(5000, MG_TIMER_REPEAT, ssdpSearchTimerHandler, &manager);
 
   // Join the SSDP multcast group
   ip4_addr_t addr = { .addr = IPADDR_ANY };
@@ -663,38 +688,38 @@ void UpnpControl::task(void* pvParameters)
         std::string uri = "http://" + std::string(esp_ip4addr_ntoa(&info.ip, buffer, sizeof(buffer))) + "/stream.wav";
 
         // Mongoose handler to chain a Play action on success
-        auto event_handler = [](struct mg_connection* nc, int ev, void* ev_data, void* user_data)
+        auto event_handler = [](struct mg_connection* c, int ev, void* ev_data, void* fn_data)
         {
-          if (ev != MG_EV_HTTP_REPLY)
+          if (ev != MG_EV_HTTP_MSG)
             return;
         
-          struct http_message* hm = (struct http_message*) ev_data;
+          struct mg_http_message* hm = (struct mg_http_message*) ev_data;
             
           // Throw error on bad response
-          if (hm->resp_code != 200)
+          if (Warthog::http_status_code(hm) != 200)
           {
-            ESP_LOGE(TAG, "Failed SetAvTransportUri action. Code: %d Response: %s.", hm->resp_code, mg_str_string(&hm->resp_status_msg).c_str());
+            ESP_LOGE(TAG, "Failed SetAvTransportUri action. Code: %d Response: %s.", Warthog::http_status_code(hm), Warthog::http_status_message(hm).c_str());
             return;
           }
 
           // Mongoose handler for play action
-          auto play_event_handler = [](struct mg_connection* nc, int ev, void* ev_data, void* user_data)
+          auto play_event_handler = [](struct mg_connection* c, int ev, void* ev_data, void* fn_data)
           {
-            if (ev != MG_EV_HTTP_REPLY)
+            if (ev != MG_EV_HTTP_MSG)
               return;
             
-            struct http_message* hm = (struct http_message*) ev_data;
+            struct mg_http_message* hm = (struct mg_http_message*) ev_data;
             
-            if (hm->resp_code != 200)
-              ESP_LOGE(TAG, "Failed Play action. Code: %d Response: %s.", hm->resp_code, mg_str_string(&hm->resp_status_msg).c_str());
+            if (Warthog::http_status_code(hm) != 200)
+              ESP_LOGE(TAG, "Failed Play action. Code: %d Response: %s.", Warthog::http_status_code(hm), Warthog::http_status_message(hm).c_str());
           };
 
-          // Extact the renderer control url from the user_data pointer
-          const std::string* url = (const std::string*) user_data;
+          // Extact the renderer control url from the fn_data pointer
+          const std::string* url = (const std::string*) fn_data;
           
           // Send play action to renderer
           UPNP::PlayAction play;
-          mg_connect_http(nc->mgr, play_event_handler, nullptr, url->c_str(), play.headers().c_str(), play.body().c_str());
+          Warthog::http_connect_post(c->mgr, *url, play_event_handler, nullptr, play.headers(), play.body());
 
           // Free the control url
           // TODO we could leak memory if we never get a reply
@@ -721,12 +746,12 @@ void UpnpControl::task(void* pvParameters)
 
           ESP_LOGI(TAG, "Starting playback on '%s'.", r.name.c_str());
 
-          // Allocate a string on the heap to pass as user_data
+          // Allocate a string on the heap to pass as fn_data
           std::string* url = new std::string(r.control_url);
 
           // Construct and send the set URI action
           UPNP::SetAvTransportUriAction setUri(uri);
-          mg_connect_http(&manager, event_handler, url, r.control_url.c_str(), setUri.headers().c_str(), setUri.body().c_str());
+          Warthog::http_connect_post(&manager, r.control_url, event_handler, url, setUri.headers().c_str(), setUri.body().c_str());
         }
 
         xSemaphoreGive(renderer_mutex);
@@ -741,15 +766,15 @@ void UpnpControl::task(void* pvParameters)
         // Stop playback on selected renderers
         
         // Mongoose handler. Yay lambdas
-        auto event_handler = [](struct mg_connection* nc, int ev, void* ev_data, void* user_data)
+        auto event_handler = [](struct mg_connection* c, int ev, void* ev_data, void* fn_data)
         {
-          if (ev != MG_EV_HTTP_REPLY)
+          if (ev != MG_EV_HTTP_MSG)
             return;
           
-          struct http_message* hm = (struct http_message*) ev_data;
+          struct mg_http_message* hm = (struct mg_http_message*) ev_data;
           
-          if (hm->resp_code != 200)
-            ESP_LOGE(TAG, "Failed Stop action. Code: %d Response: %s.", hm->resp_code, mg_str_string(&hm->resp_status_msg).c_str());
+          if (Warthog::http_status_code(hm) != 200)
+            ESP_LOGE(TAG, "Failed Stop action. Code: %d Response: %s.", Warthog::http_status_code(hm), Warthog::http_status_message(hm).c_str());
         };
 
         xSemaphoreTake(renderer_mutex, portMAX_DELAY);
@@ -772,7 +797,7 @@ void UpnpControl::task(void* pvParameters)
 
           // Send stop action to renderer
           UPNP::StopAction stop;
-          mg_connect_http(&manager, event_handler, nullptr, r.control_url.c_str(), stop.headers().c_str(), stop.body().c_str());
+          Warthog::http_connect_post(&manager, r.control_url, event_handler, nullptr, stop.headers(), stop.body());
         }
 
         xSemaphoreGive(renderer_mutex);
