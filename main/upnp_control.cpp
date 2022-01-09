@@ -553,7 +553,7 @@ static void ssdpSearchTimerHandler(Warthog::Timer* timer, void* fn_data)
 
   // Stop search after appropriate time
   Warthog::Timer* search_timeout = new Warthog::Timer();
-  search_timeout->init(10*1000, 0, [](Warthog::Timer* timer, void* fn_data)
+  search_timeout->init(SSDP::MX * 1000, 0, [](Warthog::Timer* timer, void* fn_data)
   {
     ESP_LOGI(TAG, "Search completed.");
 
