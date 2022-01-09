@@ -471,6 +471,8 @@ static void ssdpDiscoveryEventHandler(struct mg_connection* c, int ev, void* ev_
       if (Warthog::http_status_code(hm) != 200)
       {
         ESP_LOGE(TAG, "Invalid SSDP search response: %s", Warthog::http_status_message(hm).c_str());
+        // Free the chunk
+        mg_iobuf_del(&c->recv, 0, hm->message.len);
         return;
       }
 
@@ -479,6 +481,8 @@ static void ssdpDiscoveryEventHandler(struct mg_connection* c, int ev, void* ev_
       if (mg_vcasecmp(ST, SSDP::search_target) != 0)
       {
         ESP_LOGW(TAG, "Ignoring non-matching ST: %s", mg_str_string(ST).c_str());
+        // Free the chunk
+        mg_iobuf_del(&c->recv, 0, hm->message.len);
         return;
       }
 
@@ -487,6 +491,8 @@ static void ssdpDiscoveryEventHandler(struct mg_connection* c, int ev, void* ev_
       if (location.empty())
       {
         ESP_LOGE(TAG, "No LOCATION in SSDP search response.");
+        // Free the chunk
+        mg_iobuf_del(&c->recv, 0, hm->message.len);
         return;
       }
 
@@ -494,6 +500,8 @@ static void ssdpDiscoveryEventHandler(struct mg_connection* c, int ev, void* ev_
       if (cache_control.empty())
       {
         ESP_LOGE(TAG, "No CACHE-CONTROL in SSDP search response.");
+        // Free the chunk
+        mg_iobuf_del(&c->recv, 0, hm->message.len);
         return;
       }
 
@@ -502,6 +510,8 @@ static void ssdpDiscoveryEventHandler(struct mg_connection* c, int ev, void* ev_
       if (sscanf(cache_control.c_str(), "max-age = %d", &max_age) != 1)
       {
         ESP_LOGE(TAG, "Could not extract max-age from SSDP CACHE-CONTROL: %s", cache_control.c_str());
+        // Free the chunk
+        mg_iobuf_del(&c->recv, 0, hm->message.len);
         return;
       }
 
@@ -509,11 +519,16 @@ static void ssdpDiscoveryEventHandler(struct mg_connection* c, int ev, void* ev_
       {
         // Unable to find required fields in response
         ESP_LOGE(TAG, "SSDP response missing required fields. Response: %s", std::string(hm->message.ptr, hm->body.ptr).c_str());
+        // Free the chunk
+        mg_iobuf_del(&c->recv, 0, hm->message.len);
         return;
       }
 
       // Fetch description xml
       Warthog::http_connect_get(c->mgr, location.c_str(), ssdpDescriptionEventHandler);
+
+      // Free the chunk
+      mg_iobuf_del(&c->recv, 0, hm->message.len);
 
       break;
     }
