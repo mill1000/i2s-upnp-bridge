@@ -36,7 +36,7 @@ static void httpStreamEventHandler(struct mg_connection* c, int ev, void* ev_dat
     case MG_EV_HTTP_MSG:
     {
       char addr[32];
-      mg_straddr(c, addr, sizeof(addr));
+      mg_straddr(&c->peer, addr, sizeof(addr));
 
       // Lock the client list
       xSemaphoreTake(client_mutex, portMAX_DELAY);
@@ -104,7 +104,7 @@ static void httpStreamEventHandler(struct mg_connection* c, int ev, void* ev_dat
     case MG_EV_CLOSE:
     {
       char addr[32];
-      mg_straddr(c, addr, sizeof(addr));
+      mg_straddr(&c->peer, addr, sizeof(addr));
       ESP_LOGI(TAG, "Client %p (%s) disconnected.", c, addr);
 
       // Delete the clients queue

@@ -325,7 +325,7 @@ static void ssdpDescriptionEventHandler(struct mg_connection* c, int ev, void* e
     case MG_EV_HTTP_MSG:
     {
       char addr[32];
-      mg_straddr(c, addr, sizeof(addr));
+      mg_straddr(&c->peer, addr, sizeof(addr));
       std::string host = std::string(addr);
 
       struct mg_http_message* hm = (struct mg_http_message*) ev_data;
